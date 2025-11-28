@@ -20,86 +20,149 @@ from app.teacher_metrics import compute_teacher_ndcg_at_k, compute_teacher_preci
 app = FastAPI(title="SeekerScholar API", version="1.0.0")
 
 # Initialize engine on module import
-# Data directory can be configured via DATA_DIR environment variable
-# For Render: root directory is 'backend', so ../data means repo_root/data
-# We need to resolve the path correctly
+# Data directory path resolution for Render deployment
 
 def get_data_dir():
     """Get the data directory path, resolving relative paths correctly."""
     # Get the backend root (where download_data.py is)
+    # api.py is at: /app/app/api.py
+    # So backend root is: /app/
     backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # Check if DATA_DIR is set
-    data_dir = os.getenv("DATA_DIR")
+    data_dir_env = os.getenv("DATA_DIR")
     
-    if data_dir:
+    if data_dir_env:
         # If absolute path, use it
-        if os.path.isabs(data_dir):
-            return data_dir
+        if os.path.isabs(data_dir_env):
+            return data_dir_env
         # If relative, resolve from backend root
-        return os.path.abspath(os.path.join(backend_root, data_dir))
+        return os.path.abspath(os.path.join(backend_root, data_dir_env))
     else:
         # Default: ../data relative to backend root
-        return os.path.abspath(os.path.join(backend_root, "..", "data"))
+        # backend_root = /app/, so ../data = /opt/render/project/src/data
+        data_dir = os.path.abspath(os.path.join(backend_root, "..", "data"))
+        return data_dir
 
-data_dir = get_data_dir()
-print(f"Data directory: {data_dir}")
-print(f"Data directory exists: {os.path.exists(data_dir)}")
-
-# If data files don't exist, try to download them (for Render deployment)
-data_file_path = os.path.join(data_dir, "df.pkl")
-if not os.path.exists(data_file_path):
-    print(f"Data files not found at {data_file_path}. Attempting to download...")
+def download_data_files(data_dir):
+    """Download data files if they don't exist."""
+    import subprocess
+    
+    # Ensure directory exists
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # Get backend root
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_path = os.path.join(backend_root, "download_data.py")
+    
+    if not os.path.exists(script_path):
+        print(f"ERROR: download_data.py not found at {script_path}")
+        return False
+    
+    print(f"Running download script: {script_path}")
+    print(f"Downloading to: {data_dir}")
+    
+    # Set DATA_DIR environment variable
+    env = os.environ.copy()
+    env["DATA_DIR"] = data_dir
+    
     try:
-        # Try to run download script from backend root
-        import subprocess
-        backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        script_path = os.path.join(backend_root, "download_data.py")
+        result = subprocess.run(
+            [sys.executable, script_path],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=backend_root,
+            timeout=600  # 10 minute timeout for large downloads
+        )
         
-        if os.path.exists(script_path):
-            print(f"Running download script: {script_path}")
-            # Set DATA_DIR so download script uses the same path
-            env = os.environ.copy()
-            env["DATA_DIR"] = data_dir
-            result = subprocess.run(
-                [sys.executable, script_path],
-                check=False,
-                capture_output=True,
-                text=True,
-                env=env,
-                cwd=backend_root
-            )
-            print("Download script output:")
+        print("=" * 60)
+        print("DOWNLOAD SCRIPT OUTPUT:")
+        print("=" * 60)
+        if result.stdout:
             print(result.stdout)
-            if result.stderr:
-                print("Download script errors:")
-                print(result.stderr)
-        else:
-            print(f"Warning: download_data.py not found at {script_path}")
-            print("Please ensure data files are downloaded during build.")
+        if result.stderr:
+            print("STDERR:")
+            print(result.stderr)
+        print("=" * 60)
+        print(f"Return code: {result.returncode}")
+        
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        print("ERROR: Download script timed out after 10 minutes")
+        return False
     except Exception as e:
-        print(f"Warning: Could not download data files: {e}")
+        print(f"ERROR running download script: {e}")
         import traceback
         traceback.print_exc()
+        return False
 
-# Check again if files exist after download attempt
-if not os.path.exists(data_file_path):
-    print(f"\nERROR: Data file not found at: {data_file_path}")
-    print(f"Data directory: {data_dir}")
-    print(f"Backend root: {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
-    print(f"Current working directory: {os.getcwd()}")
-    if os.path.exists(data_dir):
-        print(f"Data directory contents: {os.listdir(data_dir)}")
-    else:
-        print("Data directory does not exist!")
-    print("\nPlease check:")
-    print("1. Build command includes: python download_data.py")
-    print("2. DATA_DIR environment variable is set correctly")
-    print("3. Google Drive files are accessible")
-    print("4. Check build logs for download errors")
-    raise FileNotFoundError(f"Data file not found: {data_file_path}")
+# Get data directory
+data_dir = get_data_dir()
+print(f"\n{'='*60}")
+print(f"DATA DIRECTORY CONFIGURATION")
+print(f"{'='*60}")
+print(f"Data directory: {data_dir}")
+print(f"Absolute path: {os.path.abspath(data_dir)}")
+print(f"Directory exists: {os.path.exists(data_dir)}")
+print(f"Backend root: {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
+print(f"Current working directory: {os.getcwd()}")
+print(f"{'='*60}\n")
 
-print(f"✓ Data files found. Initializing engine...")
+# Check if data files exist
+required_files = ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]
+missing_files = []
+
+for filename in required_files:
+    filepath = os.path.join(data_dir, filename)
+    if not os.path.exists(filepath):
+        missing_files.append(filename)
+        print(f"✗ Missing: {filename} at {filepath}")
+
+# If any files are missing, try to download them
+if missing_files:
+    print(f"\n{'='*60}")
+    print(f"DOWNLOADING MISSING FILES: {', '.join(missing_files)}")
+    print(f"{'='*60}\n")
+    
+    success = download_data_files(data_dir)
+    
+    if not success:
+        print("\nERROR: Download script failed!")
+    
+    # Check again
+    still_missing = []
+    for filename in missing_files:
+        filepath = os.path.join(data_dir, filename)
+        if os.path.exists(filepath):
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            print(f"✓ {filename}: {size_mb:.2f} MB")
+        else:
+            still_missing.append(filename)
+            print(f"✗ {filename}: STILL MISSING")
+
+    if still_missing:
+        print(f"\n{'='*60}")
+        print(f"ERROR: Could not download files: {', '.join(still_missing)}")
+        print(f"{'='*60}")
+        print(f"Data directory: {data_dir}")
+        if os.path.exists(data_dir):
+            print(f"Directory contents: {os.listdir(data_dir)}")
+        else:
+            print("Data directory does not exist!")
+        print(f"\nTroubleshooting:")
+        print(f"1. Check build logs for download errors")
+        print(f"2. Verify Google Drive files are accessible")
+        print(f"3. Check DATA_DIR environment variable")
+        print(f"4. Verify network connectivity in Render")
+        raise FileNotFoundError(f"Data files not found: {', '.join(still_missing)}")
+else:
+    print("✓ All data files found!")
+
+print(f"\n{'='*60}")
+print(f"INITIALIZING ENGINE")
+print(f"{'='*60}\n")
 engine = PaperSearchEngine(data_dir=data_dir)
 
 # Initialize teacher evaluator
