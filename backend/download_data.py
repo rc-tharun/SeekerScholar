@@ -43,8 +43,18 @@ def download_from_url(url: str, output_path: str):
         return False
 
 def main():
-    data_dir = os.getenv("DATA_DIR", "../data")
+    # For Render: if DATA_DIR not set, use absolute path relative to script location
+    default_data_dir = os.getenv("DATA_DIR")
+    if not default_data_dir:
+        # Try ../data relative to script, or ./data in current directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        default_data_dir = os.path.join(script_dir, "..", "data")
+        # Normalize path
+        default_data_dir = os.path.normpath(default_data_dir)
+    
+    data_dir = os.getenv("DATA_DIR", default_data_dir)
     Path(data_dir).mkdir(parents=True, exist_ok=True)
+    print(f"Data directory: {os.path.abspath(data_dir)}")
     
     # Google Drive file IDs (configured for SeekerScholar)
     gdrive_files = {

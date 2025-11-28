@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Literal, Tuple
 import os
+import sys
 import re
 import tempfile
 from pypdf import PdfReader
@@ -21,7 +22,24 @@ app = FastAPI(title="SeekerScholar API", version="1.0.0")
 # Initialize engine on module import
 # Data directory can be configured via DATA_DIR environment variable
 # Defaults to ../data relative to backend root for local development
+# For Render, use absolute path or relative to app directory
 data_dir = os.getenv("DATA_DIR", "../data")
+
+# If data files don't exist, try to download them (for Render deployment)
+if not os.path.exists(os.path.join(data_dir, "df.pkl")):
+    print("Data files not found. Attempting to download...")
+    try:
+        # Try to run download script
+        import subprocess
+        script_path = os.path.join(os.path.dirname(__file__), "..", "download_data.py")
+        if os.path.exists(script_path):
+            subprocess.run([sys.executable, script_path], check=False)
+        else:
+            print(f"Warning: download_data.py not found at {script_path}")
+    except Exception as e:
+        print(f"Warning: Could not download data files: {e}")
+        print("Please ensure data files are available or set DATA_DIR correctly.")
+
 engine = PaperSearchEngine(data_dir=data_dir)
 
 # Initialize teacher evaluator

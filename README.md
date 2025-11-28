@@ -220,6 +220,8 @@ Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. C
      ```
      (Or use `bash download_data.sh` if using shell script)
    - **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
+   
+   **Important:** The build command downloads data files. Make sure the build completes successfully before the service starts.
 
 3. **Set environment variables:**
    - `PORT`: Automatically set by Render (do not override)
