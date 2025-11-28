@@ -25,7 +25,7 @@ app = FastAPI(title="SeekerScholar API", version="1.0.0")
 def get_data_dir():
     """Get the data directory path, resolving relative paths correctly."""
     # Get the backend root (where download_data.py is)
-    # api.py is at: /app/app/api.py
+    # api.py is at: /app/app/api.py (when root directory is 'backend')
     # So backend root is: /app/
     backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
@@ -40,8 +40,11 @@ def get_data_dir():
         return os.path.abspath(os.path.join(backend_root, data_dir_env))
     else:
         # Default: ../data relative to backend root
-        # backend_root = /app/, so ../data = /opt/render/project/src/data
-        data_dir = os.path.abspath(os.path.join(backend_root, "..", "data"))
+        # backend_root = /app/ (backend directory)
+        # ../data from /app/ = repo root / data
+        # Use normpath to resolve properly
+        data_dir = os.path.join(backend_root, "..", "data")
+        data_dir = os.path.normpath(os.path.abspath(data_dir))
         return data_dir
 
 def download_data_files(data_dir):
@@ -51,15 +54,32 @@ def download_data_files(data_dir):
     # Ensure directory exists
     os.makedirs(data_dir, exist_ok=True)
     
-    # Get backend root
+    # Get backend root (where download_data.py should be)
     backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    script_path = os.path.join(backend_root, "download_data.py")
     
-    if not os.path.exists(script_path):
-        print(f"ERROR: download_data.py not found at {script_path}")
+    # Try multiple possible locations for download_data.py
+    possible_script_paths = [
+        os.path.join(backend_root, "download_data.py"),  # /app/download_data.py
+        "download_data.py",  # Current directory
+        os.path.join(os.getcwd(), "download_data.py"),  # From current working dir
+    ]
+    
+    script_path = None
+    for path in possible_script_paths:
+        abs_path = os.path.abspath(path)
+        if os.path.exists(abs_path):
+            script_path = abs_path
+            break
+    
+    if not script_path:
+        print(f"ERROR: download_data.py not found. Tried:")
+        for path in possible_script_paths:
+            print(f"  - {os.path.abspath(path)}")
+        print(f"Backend root: {backend_root}")
+        print(f"Current directory: {os.getcwd()}")
         return False
     
-    print(f"Running download script: {script_path}")
+    print(f"Found download script at: {script_path}")
     print(f"Downloading to: {data_dir}")
     
     # Set DATA_DIR environment variable
@@ -73,7 +93,7 @@ def download_data_files(data_dir):
             capture_output=True,
             text=True,
             env=env,
-            cwd=backend_root,
+            cwd=os.path.dirname(script_path),  # Run from script's directory
             timeout=600  # 10 minute timeout for large downloads
         )
         
