@@ -57,6 +57,7 @@ Thumbs.db
 data/*.pkl
 data/*.pt
 data/*.pkl.gz
+data/*.pt.gz
 # Keep data directory structure but ignore contents
 !data/.gitkeep
 

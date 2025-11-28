@@ -175,34 +175,73 @@ Example: `GET /search?query=neural%20networks&method=bert&top_k=5`
 
 ### Backend Deployment (Render)
 
-1. **Prepare for deployment:**
-   - Ensure your `data/` folder is accessible (you may need to upload it separately or use a cloud storage service)
-   - The data directory path can be configured via the `DATA_DIR` environment variable
+#### Step 1: Prepare Data Files
 
-2. **Create a Render account** and create a new Web Service
+Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. Choose one option:
 
-3. **Configure the service:**
+**Option A: Cloud Storage (Recommended)**
+1. Upload your data files to one of these services:
+   - **Google Drive**: Upload files, get shareable links, use `gdown` to download
+   - **AWS S3**: Upload to S3 bucket, use `aws s3 cp` in build script
+   - **Dropbox/OneDrive**: Upload and get direct download URLs
+   - **Any web server**: Host files and get direct URLs
+
+2. Set environment variables in Render with download URLs:
+   - `DATA_DF_URL`: URL to download `df.pkl`
+   - `DATA_BM25_URL`: URL to download `bm25.pkl`
+   - `DATA_EMBEDDINGS_URL`: URL to download `embeddings.pt`
+   - `DATA_GRAPH_URL`: URL to download `graph.pkl`
+
+**Option B: Render Persistent Disk**
+1. Create a persistent disk in Render
+2. SSH into your Render instance
+3. Upload data files via SCP:
+   ```bash
+   scp data/*.pkl data/*.pt root@your-render-instance:/path/to/data/
+   ```
+4. Set `DATA_DIR` environment variable to the disk mount point
+
+**Option C: Compress and Split Files**
+1. Compress files: `gzip data/*.pkl data/*.pt`
+2. Split large files: `split -b 50M data/df.pkl.gz data/df.pkl.gz.part`
+3. Upload parts to GitHub or cloud storage
+4. Create build script to reassemble during deployment
+
+#### Step 2: Configure Render Service
+
+1. **Create a Render account** and create a new Web Service
+
+2. **Configure the service:**
    - **Root Directory:** `backend`
    - **Environment:** Python 3.11
-   - **Build Command:** `pip install -r requirements.txt`
+   - **Build Command:** 
+     ```bash
+     pip install -r requirements.txt && python download_data.py
+     ```
+     (Or use `bash download_data.sh` if using shell script)
    - **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
 
-4. **Set environment variables:**
+3. **Set environment variables:**
    - `PORT`: Automatically set by Render (do not override)
-   - `DATA_DIR`: (Optional) Path to data directory. Defaults to `../data` relative to backend root. 
-     - If data is in the repo root: `DATA_DIR=../data`
-     - If data is mounted elsewhere: Set the absolute or relative path
+   - `DATA_DIR`: (Optional) Path to data directory. Defaults to `../data`
+   - `DATA_DF_URL`: (If using Option A) URL to download df.pkl
+   - `DATA_BM25_URL`: (If using Option A) URL to download bm25.pkl
+   - `DATA_EMBEDDINGS_URL`: (If using Option A) URL to download embeddings.pt
+   - `DATA_GRAPH_URL`: (If using Option A) URL to download graph.pkl
 
-5. **Deploy:**
+4. **Deploy:**
    - Connect your GitHub repository
    - Render will automatically deploy on push
 
-**Note:** For the data folder, you have several options:
-- **Option 1 (Recommended):** Include `data/` folder in the repository if size allows (< 100MB recommended)
-- **Option 2:** Upload `data/` folder to cloud storage (S3, Google Cloud Storage) and download during build using a build script
-- **Option 3:** Use Render's persistent disk feature and mount it, then set `DATA_DIR` to the mount point
-
 **Health Check:** Render will use `GET /health` endpoint for health checks.
+
+#### Quick Setup with Google Drive (Example)
+
+1. Upload data files to Google Drive
+2. Get shareable links and extract file IDs
+3. Install `gdown` in build: Add `gdown` to `requirements.txt` or install in build command
+4. Update `download_data.sh` with your Google Drive file IDs
+5. Use build command: `pip install -r requirements.txt gdown && bash download_data.sh`
 
 ### Frontend Deployment (Vercel)
 
