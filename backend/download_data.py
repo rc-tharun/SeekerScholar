@@ -43,22 +43,26 @@ def download_from_url(url: str, output_path: str):
         return False
 
 def main():
-    # For Render: if DATA_DIR not set, use absolute path relative to script location
-    default_data_dir = os.getenv("DATA_DIR")
-    if not default_data_dir:
-        # Try ../data relative to script, or ./data in current directory
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_data_dir = os.path.join(script_dir, "..", "data")
-        # Normalize path
-        default_data_dir = os.path.normpath(default_data_dir)
+    # Get DATA_DIR from environment, or use default
+    data_dir = os.getenv("DATA_DIR")
     
-    data_dir = os.getenv("DATA_DIR", default_data_dir)
-    # Ensure absolute path
+    if not data_dir:
+        # Default: ../data relative to script (backend root)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Script is in backend/, so ../data is repo_root/data
+        data_dir = os.path.join(script_dir, "..", "data")
+        data_dir = os.path.normpath(data_dir)
+    
+    # Always convert to absolute path
     if not os.path.isabs(data_dir):
         data_dir = os.path.abspath(data_dir)
+    
+    # Create directory if it doesn't exist
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    print(f"Data directory: {data_dir}")
-    print(f"Data directory (absolute): {os.path.abspath(data_dir)}")
+    
+    print(f"Downloading data files to: {data_dir}")
+    print(f"Absolute path: {os.path.abspath(data_dir)}")
+    print(f"Directory exists: {os.path.exists(data_dir)}")
     
     # Google Drive file IDs (configured for SeekerScholar)
     gdrive_files = {
