@@ -225,11 +225,15 @@ Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. C
 
 3. **Set environment variables:**
    - `PORT`: Automatically set by Render (do not override)
-   - `DATA_DIR`: (Optional) Path to data directory. Defaults to `../data`
-   - `DATA_DF_URL`: (If using Option A) URL to download df.pkl
-   - `DATA_BM25_URL`: (If using Option A) URL to download bm25.pkl
-   - `DATA_EMBEDDINGS_URL`: (If using Option A) URL to download embeddings.pt
-   - `DATA_GRAPH_URL`: (If using Option A) URL to download graph.pkl
+   - `DATA_DIR`: (Optional) Path to data directory. Defaults to `../data` relative to backend root
+     - For Render with root directory `backend`, use `../data` (this points to repo root/data)
+     - Alternative: Use absolute path like `/opt/render/project/src/data` if needed
+   - `DATA_DF_URL`: (Optional, if using custom URLs) URL to download df.pkl
+   - `DATA_BM25_URL`: (Optional, if using custom URLs) URL to download bm25.pkl
+   - `DATA_EMBEDDINGS_URL`: (Optional, if using custom URLs) URL to download embeddings.pt
+   - `DATA_GRAPH_URL`: (Optional, if using custom URLs) URL to download graph.pkl
+   
+   **Note:** If you don't set the DATA_*_URL variables, the script will use the pre-configured Google Drive file IDs.
 
 4. **Deploy:**
    - Connect your GitHub repository

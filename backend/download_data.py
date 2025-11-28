@@ -53,8 +53,12 @@ def main():
         default_data_dir = os.path.normpath(default_data_dir)
     
     data_dir = os.getenv("DATA_DIR", default_data_dir)
+    # Ensure absolute path
+    if not os.path.isabs(data_dir):
+        data_dir = os.path.abspath(data_dir)
     Path(data_dir).mkdir(parents=True, exist_ok=True)
-    print(f"Data directory: {os.path.abspath(data_dir)}")
+    print(f"Data directory: {data_dir}")
+    print(f"Data directory (absolute): {os.path.abspath(data_dir)}")
     
     # Google Drive file IDs (configured for SeekerScholar)
     gdrive_files = {
