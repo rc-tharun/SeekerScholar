@@ -42,80 +42,83 @@ def get_data_dir():
     else:
         # Default: ../data relative to backend root
         # backend_root = /app/ (backend directory)
-        # ../data from /app/ = repo root / data
-        # In Render: /app/../data = /opt/render/project/src/data
+        # We need to go up one level to repo root, then into data
+        # But we need to be careful - if /app/ is the root, ../data might resolve to /data
+        # So let's check if we're in a typical Render setup
+        
+        # Try ../data from backend root
         data_dir = os.path.join(backend_root, "..", "data")
-        # Use realpath to resolve any symlinks and normalize
-        data_dir = os.path.realpath(os.path.abspath(data_dir))
+        data_dir = os.path.normpath(os.path.abspath(data_dir))
+        
+        # If it resolves to /data (which is wrong), try a different approach
+        # In Render, if root is 'backend', the repo structure is:
+        # /opt/render/project/src/backend/  (this is /app/)
+        # /opt/render/project/src/data/     (this is what we want)
+        # So ../data from /app/ should work, but if it doesn't, use ./data in backend
+        if data_dir == "/data":
+            # Fallback: use ./data in backend root (we'll download there)
+            data_dir = os.path.join(backend_root, "data")
+            print(f"WARNING: ../data resolved to /data, using fallback: {data_dir}")
+        
         return data_dir
 
 def download_data_files(data_dir):
-    """Download data files if they don't exist."""
-    import subprocess
+    """Download data files if they don't exist - inline download without script."""
+    print(f"Downloading data files directly to: {data_dir}")
     
     # Ensure directory exists
     os.makedirs(data_dir, exist_ok=True)
     
-    # Get backend root (where download_data.py should be)
-    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
-    # Try multiple possible locations for download_data.py
-    possible_script_paths = [
-        os.path.join(backend_root, "download_data.py"),  # /app/download_data.py
-        "download_data.py",  # Current directory
-        os.path.join(os.getcwd(), "download_data.py"),  # From current working dir
-    ]
-    
-    script_path = None
-    for path in possible_script_paths:
-        abs_path = os.path.abspath(path)
-        if os.path.exists(abs_path):
-            script_path = abs_path
-            break
-    
-    if not script_path:
-        print(f"ERROR: download_data.py not found. Tried:")
-        for path in possible_script_paths:
-            print(f"  - {os.path.abspath(path)}")
-        print(f"Backend root: {backend_root}")
-        print(f"Current directory: {os.getcwd()}")
-        return False
-    
-    print(f"Found download script at: {script_path}")
-    print(f"Downloading to: {data_dir}")
-    
-    # Set DATA_DIR environment variable
-    env = os.environ.copy()
-    env["DATA_DIR"] = data_dir
-    
     try:
-        result = subprocess.run(
-            [sys.executable, script_path],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=os.path.dirname(script_path),  # Run from script's directory
-            timeout=600  # 10 minute timeout for large downloads
-        )
+        # Import gdown directly
+        try:
+            import gdown
+        except ImportError:
+            print("Installing gdown...")
+            import subprocess
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "gdown"], 
+                                capture_output=True)
+            import gdown
         
-        print("=" * 60)
-        print("DOWNLOAD SCRIPT OUTPUT:")
-        print("=" * 60)
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print("STDERR:")
-            print(result.stderr)
-        print("=" * 60)
-        print(f"Return code: {result.returncode}")
+        # Google Drive file IDs
+        gdrive_files = {
+            "df.pkl": "1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h",
+            "bm25.pkl": "1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y",
+            "embeddings.pt": "12e382jL02z56gz5fPOINxBxHYVTBqIBb",
+            "graph.pkl": "1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU",
+        }
         
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        print("ERROR: Download script timed out after 10 minutes")
-        return False
+        downloaded = []
+        failed = []
+        
+        for filename, file_id in gdrive_files.items():
+            output_path = os.path.join(data_dir, filename)
+            url = f"https://drive.google.com/uc?id={file_id}"
+            
+            try:
+                print(f"Downloading {filename}...")
+                gdown.download(url, output_path, quiet=False)
+                
+                if os.path.exists(output_path):
+                    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                    print(f"✓ {filename}: {size_mb:.2f} MB")
+                    downloaded.append(filename)
+                else:
+                    print(f"✗ {filename}: Download completed but file not found")
+                    failed.append(filename)
+            except Exception as e:
+                print(f"✗ {filename}: Error - {e}")
+                failed.append(filename)
+        
+        if failed:
+            print(f"\nFailed to download: {', '.join(failed)}")
+            return False
+        
+        print(f"\n✓ Successfully downloaded all {len(downloaded)} files!")
+        return True
+        
     except Exception as e:
-        print(f"ERROR running download script: {e}")
+        print(f"ERROR during download: {e}")
         import traceback
         traceback.print_exc()
         return False
