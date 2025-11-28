@@ -42,23 +42,24 @@ def get_data_dir():
     else:
         # Default: ../data relative to backend root
         # backend_root = /app/ (backend directory)
-        # We need to go up one level to repo root, then into data
-        # But we need to be careful - if /app/ is the root, ../data might resolve to /data
-        # So let's check if we're in a typical Render setup
+        # In Render with root directory 'backend':
+        # - /app/ = backend/ directory
+        # - /app/../ = repo root (parent of backend)
+        # - /app/../data = repo root / data
         
-        # Try ../data from backend root
-        data_dir = os.path.join(backend_root, "..", "data")
-        data_dir = os.path.normpath(os.path.abspath(data_dir))
+        # First try: ../data from backend root
+        data_dir_candidate = os.path.join(backend_root, "..", "data")
+        data_dir_candidate = os.path.normpath(os.path.abspath(data_dir_candidate))
         
-        # If it resolves to /data (which is wrong), try a different approach
-        # In Render, if root is 'backend', the repo structure is:
-        # /opt/render/project/src/backend/  (this is /app/)
-        # /opt/render/project/src/data/     (this is what we want)
-        # So ../data from /app/ should work, but if it doesn't, use ./data in backend
-        if data_dir == "/data":
-            # Fallback: use ./data in backend root (we'll download there)
+        # Check if this resolves to /data (which would be wrong - system root)
+        # If so, use ./data in backend root instead
+        if data_dir_candidate == "/data" or not os.path.exists(os.path.dirname(data_dir_candidate)):
+            # Fallback: use ./data in backend root
             data_dir = os.path.join(backend_root, "data")
-            print(f"WARNING: ../data resolved to /data, using fallback: {data_dir}")
+            print(f"Using data directory in backend root: {data_dir}")
+        else:
+            data_dir = data_dir_candidate
+            print(f"Using data directory from repo root: {data_dir}")
         
         return data_dir
 
