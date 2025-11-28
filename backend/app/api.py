@@ -37,14 +37,16 @@ def get_data_dir():
         if os.path.isabs(data_dir_env):
             return data_dir_env
         # If relative, resolve from backend root
-        return os.path.abspath(os.path.join(backend_root, data_dir_env))
+        resolved = os.path.join(backend_root, data_dir_env)
+        return os.path.normpath(os.path.abspath(resolved))
     else:
         # Default: ../data relative to backend root
         # backend_root = /app/ (backend directory)
         # ../data from /app/ = repo root / data
-        # Use normpath to resolve properly
+        # In Render: /app/../data = /opt/render/project/src/data
         data_dir = os.path.join(backend_root, "..", "data")
-        data_dir = os.path.normpath(os.path.abspath(data_dir))
+        # Use realpath to resolve any symlinks and normalize
+        data_dir = os.path.realpath(os.path.abspath(data_dir))
         return data_dir
 
 def download_data_files(data_dir):
