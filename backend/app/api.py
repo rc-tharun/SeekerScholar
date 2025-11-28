@@ -26,19 +26,54 @@ app = FastAPI(title="SeekerScholar API", version="1.0.0")
 data_dir = os.getenv("DATA_DIR", "../data")
 
 # If data files don't exist, try to download them (for Render deployment)
-if not os.path.exists(os.path.join(data_dir, "df.pkl")):
+data_file_path = os.path.join(data_dir, "df.pkl")
+if not os.path.exists(data_file_path):
     print("Data files not found. Attempting to download...")
     try:
-        # Try to run download script
+        # Try to run download script from backend root
         import subprocess
-        script_path = os.path.join(os.path.dirname(__file__), "..", "download_data.py")
-        if os.path.exists(script_path):
-            subprocess.run([sys.executable, script_path], check=False)
-        else:
-            print(f"Warning: download_data.py not found at {script_path}")
+        # Get the backend root directory (parent of app/)
+        backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script_path = os.path.join(backend_root, "download_data.py")
+        
+        # Also try current directory and common locations
+        possible_paths = [
+            script_path,
+            os.path.join(os.path.dirname(__file__), "..", "download_data.py"),
+            "download_data.py",
+            os.path.join(os.getcwd(), "download_data.py"),
+        ]
+        
+        script_found = False
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                print(f"Found download script at: {abs_path}")
+                result = subprocess.run([sys.executable, abs_path], check=False, capture_output=True, text=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(f"Download script stderr: {result.stderr}")
+                script_found = True
+                break
+        
+        if not script_found:
+            print(f"Warning: download_data.py not found. Tried: {possible_paths}")
+            print("Please ensure data files are downloaded during build or set DATA_DIR correctly.")
     except Exception as e:
         print(f"Warning: Could not download data files: {e}")
+        import traceback
+        traceback.print_exc()
         print("Please ensure data files are available or set DATA_DIR correctly.")
+
+# Check again if files exist after download attempt
+if not os.path.exists(data_file_path):
+    print(f"ERROR: Data file still not found at: {os.path.abspath(data_file_path)}")
+    print(f"Data directory: {os.path.abspath(data_dir)}")
+    print("Please check:")
+    print("1. Build command includes: python download_data.py")
+    print("2. DATA_DIR environment variable is set correctly")
+    print("3. Google Drive files are accessible")
+    raise FileNotFoundError(f"Data file not found: {data_file_path}")
 
 engine = PaperSearchEngine(data_dir=data_dir)
 

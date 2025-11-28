@@ -102,14 +102,23 @@ def main():
     if downloaded:
         print("\n✓ All data files downloaded successfully!")
         # Verify files exist
+        all_exist = True
         for filename in gdrive_files.keys():
             filepath = os.path.join(data_dir, filename)
             if os.path.exists(filepath):
                 size_mb = os.path.getsize(filepath) / (1024 * 1024)
-                print(f"  {filename}: {size_mb:.2f} MB")
+                print(f"  ✓ {filename}: {size_mb:.2f} MB at {filepath}")
+            else:
+                print(f"  ✗ {filename}: NOT FOUND at {filepath}")
+                all_exist = False
+        
+        if not all_exist:
+            print("\n✗ Some files failed to download. Check Google Drive permissions.")
+            sys.exit(1)
     else:
         print("No data files were downloaded.")
-        sys.exit(1)
+        print("This might be okay if files are already present or will be provided via other means.")
+        # Don't exit with error - let the app try to start and fail gracefully if needed
 
 if __name__ == "__main__":
     main()
