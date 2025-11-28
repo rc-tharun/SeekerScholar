@@ -10,12 +10,11 @@ mkdir -p "$DATA_DIR"
 echo "Downloading data files..."
 
 # Option 1: Download from Google Drive (using gdown)
-# Install gdown: pip install gdown
-# Uncomment and replace with your Google Drive file IDs:
-# gdown --id YOUR_FILE_ID -O "$DATA_DIR/df.pkl"
-# gdown --id YOUR_FILE_ID -O "$DATA_DIR/bm25.pkl"
-# gdown --id YOUR_FILE_ID -O "$DATA_DIR/embeddings.pt"
-# gdown --id YOUR_FILE_ID -O "$DATA_DIR/graph.pkl"
+# Google Drive file IDs (configured for SeekerScholar)
+gdown --id 1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h -O "$DATA_DIR/df.pkl"
+gdown --id 1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y -O "$DATA_DIR/bm25.pkl"
+gdown --id 12e382jL02z56gz5fPOINxBxHYVTBqIBb -O "$DATA_DIR/embeddings.pt"
+gdown --id 1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU -O "$DATA_DIR/graph.pkl"
 
 # Option 2: Download from S3
 # Uncomment and configure with your S3 bucket:

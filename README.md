@@ -235,13 +235,23 @@ Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. C
 
 **Health Check:** Render will use `GET /health` endpoint for health checks.
 
-#### Quick Setup with Google Drive (Example)
+#### Quick Setup with Google Drive (Already Configured!)
 
-1. Upload data files to Google Drive
-2. Get shareable links and extract file IDs
-3. Install `gdown` in build: Add `gdown` to `requirements.txt` or install in build command
-4. Update `download_data.sh` with your Google Drive file IDs
-5. Use build command: `pip install -r requirements.txt gdown && bash download_data.sh`
+✅ **Your Google Drive files are already configured!**
+
+The download scripts are pre-configured with your Google Drive file IDs:
+- `df.pkl`: 1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h
+- `bm25.pkl`: 1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y
+- `embeddings.pt`: 12e382jL02z56gz5fPOINxBxHYVTBqIBb
+- `graph.pkl`: 1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU
+
+**Render Configuration:**
+- **Build Command:** `pip install -r requirements.txt && python download_data.py`
+- **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
+
+The script will automatically download all data files from Google Drive during the build process.
+
+**Important:** Make sure your Google Drive files are set to "Anyone with the link can view" for the download to work.
 
 ### Frontend Deployment (Vercel)
 
