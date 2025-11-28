@@ -216,8 +216,9 @@ Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. C
    - **Environment:** Python 3.11
    - **Build Command:** 
      ```bash
-     pip install -r requirements.txt && python download_data.py
+     pip install -r requirements.txt && python download_data.py && python check_data.py
      ```
+     The `check_data.py` script verifies all files were downloaded correctly. Check build logs to confirm.
      (Or use `bash download_data.sh` if using shell script)
    - **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
    
