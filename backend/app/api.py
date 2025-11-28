@@ -120,14 +120,20 @@ def download_data_files(data_dir):
 
 # Get data directory
 data_dir = get_data_dir()
+# Ensure it's an absolute path
+if not os.path.isabs(data_dir):
+    data_dir = os.path.abspath(data_dir)
+
 print(f"\n{'='*60}")
 print(f"DATA DIRECTORY CONFIGURATION")
 print(f"{'='*60}")
 print(f"Data directory: {data_dir}")
 print(f"Absolute path: {os.path.abspath(data_dir)}")
 print(f"Directory exists: {os.path.exists(data_dir)}")
-print(f"Backend root: {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
+backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+print(f"Backend root: {backend_root}")
 print(f"Current working directory: {os.getcwd()}")
+print(f"Expected data path from backend root: {os.path.abspath(os.path.join(backend_root, '..', 'data'))}")
 print(f"{'='*60}\n")
 
 # Check if data files exist
