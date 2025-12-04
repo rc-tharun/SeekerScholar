@@ -1,6 +1,9 @@
 """
-PaperSearchEngine - Core search engine for academic papers.
-Uses BM25, BERT embeddings, and PageRank for hybrid search.
+SearchEngine - High-performance 2-stage retrieval pipeline.
+Stage 1: Fast BM25 candidate generation (always runs first)
+Stage 2: Optional lightweight re-ranking on small candidate set only
+
+All document-side data is precomputed; only query-side processing happens per request.
 """
 import pickle
 import torch
@@ -9,8 +12,15 @@ import networkx as nx
 import numpy as np
 import urllib.parse
 import os
-from typing import List, Tuple, Dict
+import logging
+from typing import List, Tuple, Dict, Optional
 from sentence_transformers import SentenceTransformer, util
+import hashlib
+
+from app.config import Config
+
+# Set up logging for performance profiling
+logger = logging.getLogger(__name__)
 
 
 # PyTorch 2.6+ compatibility fix
@@ -22,132 +32,126 @@ def permissive_load(*args, **kwargs):
 torch.load = permissive_load
 
 
-class PaperSearchEngine:
+def normalize_and_truncate_query(text: str, max_chars: int = None) -> str:
     """
-    Paper search engine using BM25, BERT embeddings, and PageRank.
-    All artifacts are precomputed and loaded from disk.
+    Normalize and truncate query text for fast processing.
+    
+    Args:
+        text: Raw query text
+        max_chars: Maximum characters (defaults to Config.MAX_QUERY_LENGTH)
+        
+    Returns:
+        Normalized and truncated query
+    """
+    if max_chars is None:
+        max_chars = Config.MAX_QUERY_LENGTH
+    
+    # Basic normalization: strip, lowercase, collapse whitespace
+    text = text.strip()
+    text = " ".join(text.split())
+    
+    # Truncate if needed
+    if len(text) > max_chars:
+        text = text[:max_chars]
+    
+    return text
+
+
+class SearchEngine:
+    """
+    High-performance search engine with 2-stage retrieval:
+    1. Fast BM25 candidate generation (always runs first)
+    2. Optional lightweight re-ranking on small candidate set only
+    
+    All document-side artifacts are precomputed and loaded once at initialization.
     """
     
-    def __init__(self, data_dir: str = "../data"):
+    def __init__(self, data_dir: Optional[str] = None, cache_size: Optional[int] = None):
         """
         Initialize the search engine by loading all precomputed artifacts.
         
         Args:
             data_dir: Path to directory containing df.pkl, bm25.pkl, 
-                     embeddings.pt, and graph.pkl
+                     embeddings.pt, and graph.pkl (defaults to Config.get_data_dir())
+            cache_size: Size of LRU cache for search results (defaults to Config.CACHE_SIZE)
         """
-        print("Loading search engine components...")
+        if data_dir is None:
+            data_dir = Config.get_data_dir()
+        if cache_size is None:
+            cache_size = Config.CACHE_SIZE
+        
+        logger.info("Loading search engine components...")
         
         # Load DataFrame
         self.df = pd.read_pickle(os.path.join(data_dir, "df.pkl"))
+        logger.info(f"Loaded DataFrame with {len(self.df)} papers")
         
         # Load NetworkX graph
         with open(os.path.join(data_dir, "graph.pkl"), "rb") as f:
             self.G = pickle.load(f)
+        logger.info(f"Loaded graph with {len(self.G)} nodes")
         
-        # Load BM25 index
+        # Load BM25 index (primary candidate generator)
         with open(os.path.join(data_dir, "bm25.pkl"), "rb") as f:
             self.bm25 = pickle.load(f)
+        logger.info("Loaded BM25 index")
         
-        # Load BERT model and embeddings
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        # Ensure model is on CPU
+        # Load BERT model and embeddings (for re-ranking only)
+        self.model = SentenceTransformer(Config.BERT_MODEL_NAME)
         self.device = 'cpu'
         self.corpus_embeddings = torch.load(
             os.path.join(data_dir, "embeddings.pt"), 
             weights_only=False,
             map_location='cpu'
         )
+        logger.info(f"Loaded BERT model '{Config.BERT_MODEL_NAME}' and {len(self.corpus_embeddings)} embeddings")
         
-        print("System Ready!\n")
+        # Precompute PageRank scores for all nodes (for fast re-weighting)
+        logger.info("Precomputing PageRank scores...")
+        self.pagerank_scores = nx.pagerank(self.G, alpha=0.85, max_iter=50, tol=1e-4)
+        logger.info("Precomputed PageRank scores")
+        
+        # Initialize LRU cache for search results
+        self._cache = {}
+        self._cache_order = []
+        self._cache_size = cache_size
+        
+        logger.info("Search engine ready!")
+    
+    def _get_cache_key(self, query: str, method: str, top_k: int) -> str:
+        """Generate cache key for a search query."""
+        key_str = f"{method}:{top_k}:{query.lower().strip()}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def _get_from_cache(self, cache_key: str) -> Optional[List[Dict]]:
+        """Get result from cache if available."""
+        if cache_key in self._cache:
+            self._cache_order.remove(cache_key)
+            self._cache_order.append(cache_key)
+            return self._cache[cache_key]
+        return None
+    
+    def _add_to_cache(self, cache_key: str, results: List[Dict]):
+        """Add result to cache with LRU eviction."""
+        if cache_key in self._cache:
+            self._cache_order.remove(cache_key)
+            self._cache_order.append(cache_key)
+            return
+        
+        if len(self._cache) >= self._cache_size:
+            lru_key = self._cache_order.pop(0)
+            del self._cache[lru_key]
+        
+        self._cache[cache_key] = results
+        self._cache_order.append(cache_key)
     
     def _generate_link(self, title: str) -> str:
-        """
-        Generate an arXiv search link for a given paper title.
-        
-        Args:
-            title: Paper title
-            
-        Returns:
-            URL to arXiv search with quoted title
-        """
+        """Generate an arXiv search link for a given paper title."""
         safe_title = urllib.parse.quote(f'"{title}"')
         return f"https://arxiv.org/search/?query={safe_title}&searchtype=title"
     
-    def _get_bm25(self, query: str, top_k: int = 100) -> List[Tuple[int, float]]:
-        """
-        Get BM25 keyword-based search results.
-        
-        Args:
-            query: Search query string
-            top_k: Number of top results to return
-            
-        Returns:
-            List of (index, score) tuples
-        """
-        tokenized_query = query.lower().split()
-        scores = self.bm25.get_scores(tokenized_query)
-        top_n = np.argsort(scores)[::-1][:top_k]
-        return [(int(idx), float(scores[idx])) for idx in top_n if scores[idx] > 0]
-    
-    def _get_bert(self, query: str, top_k: int = 100) -> List[Tuple[int, float]]:
-        """
-        Get BERT semantic search results.
-        
-        Args:
-            query: Search query string
-            top_k: Number of top results to return
-            
-        Returns:
-            List of (index, score) tuples
-        """
-        query_embedding = self.model.encode(query, convert_to_tensor=True, device=self.device)
-        cos_scores = util.cos_sim(query_embedding, self.corpus_embeddings)[0]
-        top_results = torch.topk(cos_scores, k=min(top_k, len(cos_scores)))
-        return [
-            (int(idx.item()), float(score.item())) 
-            for idx, score in zip(top_results.indices, top_results.values)
-        ]
-    
-    def _get_pagerank(self, query: str, top_k: int = 100) -> List[Tuple[int, float]]:
-        """
-        Get PageRank-based results using query as personalization.
-        
-        Args:
-            query: Search query string
-            top_k: Number of top results to return
-            
-        Returns:
-            List of (index, score) tuples
-        """
-        # Get seeds from BM25
-        bm25_results = self._get_bm25(query, top_k=100)
-        
-        # Build personalization dict
-        personalization = {idx: score for idx, score in bm25_results}
-        
-        if not personalization:
-            return []
-        
-        # Run PageRank with personalization
-        pr_scores = nx.pagerank(self.G, alpha=0.85, personalization=personalization)
-        
-        # Sort and return top_k
-        sorted_results = sorted(pr_scores.items(), key=lambda x: x[1], reverse=True)
-        return [(int(idx), float(score)) for idx, score in sorted_results[:top_k]]
-    
-    def _format_result(self, idx: int, score: float, method: str) -> Dict:
-        """
-        Format a single search result into a dictionary.
-        
-        Args:
-            idx: Index into DataFrame
-            score: Relevance score
-            method: Search method name
-            
-        Returns:
-            Dictionary with paper information
-        """
+    def _format_result(self, idx: int, score: float, method: str) -> Optional[Dict]:
+        """Format a single search result into a dictionary."""
         if idx >= len(self.df):
             return None
         
@@ -161,88 +165,119 @@ class PaperSearchEngine:
             "method": method
         }
     
-    def search_bm25(self, query: str, top_k: int = 10) -> List[Dict]:
+    def _get_bm25_candidates(self, query: str, candidate_pool_size: int = None) -> List[Tuple[int, float]]:
         """
-        Public method for BM25 search.
+        Stage 1: Fast BM25 candidate generation.
+        This is the primary fast retrieval step that runs for ALL methods.
         
         Args:
-            query: Search query string
-            top_k: Number of results to return
+            query: Search query string (normalized)
+            candidate_pool_size: Number of candidates to retrieve (defaults to Config.CANDIDATE_POOL_SIZE)
             
         Returns:
-            List of result dictionaries
+            List of (index, bm25_score) tuples
         """
-        results = self._get_bm25(query, top_k=top_k)
-        formatted = [
-            self._format_result(idx, score, "bm25") 
-            for idx, score in results
-        ]
-        return [r for r in formatted if r is not None]
+        if candidate_pool_size is None:
+            candidate_pool_size = Config.CANDIDATE_POOL_SIZE
+        
+        # Tokenize query
+        tokenized_query = query.lower().split()
+        
+        # Get BM25 scores (fast - precomputed index)
+        scores = self.bm25.get_scores(tokenized_query)
+        top_n = np.argsort(scores)[::-1][:candidate_pool_size]
+        
+        results = [(int(idx), float(scores[idx])) for idx in top_n if scores[idx] > 0]
+        
+        return results
     
-    def search_bert(self, query: str, top_k: int = 10) -> List[Dict]:
+    def _rerank_with_bert(self, query: str, candidates: List[Tuple[int, float]]) -> List[Tuple[int, float]]:
         """
-        Public method for BERT semantic search.
+        Stage 2: BERT-based re-ranking on candidate set only.
+        Encodes query once, then computes similarity with candidate embeddings only.
         
         Args:
-            query: Search query string
-            top_k: Number of results to return
+            query: Search query string (normalized)
+            candidates: List of (index, bm25_score) tuples from Stage 1
             
         Returns:
-            List of result dictionaries
+            List of (index, bert_score) tuples
         """
-        results = self._get_bert(query, top_k=top_k)
-        formatted = [
-            self._format_result(idx, score, "bert") 
-            for idx, score in results
+        if not candidates:
+            return []
+        
+        # Encode query once
+        query_embedding = self.model.encode(
+            query,
+            convert_to_tensor=True,
+            device=self.device,
+            show_progress_bar=False,
+            normalize_embeddings=True
+        )
+        
+        # Get embeddings for candidates only (not full corpus!)
+        candidate_indices = [idx for idx, _ in candidates]
+        candidate_embeddings = self.corpus_embeddings[candidate_indices]
+        
+        # Compute cosine similarity (query vs candidates only)
+        cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
+        
+        # Create (index, score) pairs
+        results = [
+            (int(idx), float(score.item()))
+            for idx, score in zip(candidate_indices, cos_scores)
         ]
-        return [r for r in formatted if r is not None]
+        
+        return results
     
-    def search_pagerank(self, query: str, top_k: int = 10) -> List[Dict]:
+    def _rerank_with_pagerank(self, candidates: List[Tuple[int, float]]) -> List[Tuple[int, float]]:
         """
-        Public method for PageRank search.
+        Stage 2: PageRank-based re-weighting on candidate set only.
+        Uses precomputed PageRank scores for fast re-weighting.
         
         Args:
-            query: Search query string
-            top_k: Number of results to return
+            candidates: List of (index, bm25_score) tuples from Stage 1
             
         Returns:
-            List of result dictionaries
+            List of (index, combined_score) tuples
         """
-        results = self._get_pagerank(query, top_k=top_k)
-        formatted = [
-            self._format_result(idx, score, "pagerank") 
-            for idx, score in results
-        ]
-        return [r for r in formatted if r is not None]
+        if not candidates:
+            return []
+        
+        # Combine BM25 score with precomputed PageRank score
+        combined_scores = []
+        for idx, bm25_score in candidates:
+            pr_score = self.pagerank_scores.get(idx, 0.0)
+            # Simple linear combination (can be tuned)
+            combined_score = 0.7 * bm25_score + 0.3 * pr_score
+            combined_scores.append((idx, combined_score))
+        
+        return combined_scores
     
-    def search_hybrid(self, query: str, top_k: int = 10, 
-                     w_bm25: float = 0.3, w_bert: float = 0.5, 
-                     w_pr: float = 0.2) -> List[Dict]:
+    def _rerank_hybrid(self, query: str, candidates: List[Tuple[int, float]]) -> List[Tuple[int, float]]:
         """
-        Hybrid search combining BM25, BERT, and PageRank scores.
+        Stage 2: Hybrid re-ranking combining BM25, BERT, and PageRank on candidate set only.
         
         Args:
-            query: Search query string
-            top_k: Number of results to return
-            w_bm25: Weight for BM25 scores
-            w_bert: Weight for BERT scores
-            w_pr: Weight for PageRank scores
+            query: Search query string (normalized)
+            candidates: List of (index, bm25_score) tuples from Stage 1
             
         Returns:
-            List of result dictionaries
+            List of (index, hybrid_score) tuples
         """
-        # Get results from each method
-        bm25_results = self._get_bm25(query, top_k=top_k * 2)
-        bert_results = self._get_bert(query, top_k=top_k * 2)
-        pr_results = self._get_pagerank(query, top_k=top_k * 2)
+        if not candidates:
+            return []
         
-        # Create score dictionaries
-        bm25_scores = {idx: score for idx, score in bm25_results}
+        # Get BERT scores for candidates
+        bert_results = self._rerank_with_bert(query, candidates)
         bert_scores = {idx: score for idx, score in bert_results}
-        pr_scores = {idx: score for idx, score in pr_results}
+        
+        # Get BM25 and PageRank scores
+        bm25_scores = {idx: score for idx, score in candidates}
+        pr_scores = {idx: self.pagerank_scores.get(idx, 0.0) for idx, _ in candidates}
         
         # Normalize scores to [0, 1] range
-        def normalize_scores(scores_dict):
+        def normalize(scores_dict):
             if not scores_dict:
                 return {}
             max_score = max(scores_dict.values()) if scores_dict.values() else 1.0
@@ -250,36 +285,181 @@ class PaperSearchEngine:
             if max_score == min_score:
                 return {k: 0.5 for k in scores_dict.keys()}
             return {
-                k: (v - min_score) / (max_score - min_score) 
+                k: (v - min_score) / (max_score - min_score)
                 for k, v in scores_dict.items()
             }
         
-        bm25_norm = normalize_scores(bm25_scores)
-        bert_norm = normalize_scores(bert_scores)
-        pr_norm = normalize_scores(pr_scores)
+        bm25_norm = normalize(bm25_scores)
+        bert_norm = normalize(bert_scores)
+        pr_norm = normalize(pr_scores)
         
-        # Combine scores
-        all_indices = set(bm25_scores.keys()) | set(bert_scores.keys()) | set(pr_scores.keys())
-        combined_scores = {}
-        
-        for idx in all_indices:
+        # Combine with config weights
+        weights = Config.HYBRID_WEIGHTS
+        combined_scores = []
+        for idx, _ in candidates:
             score = (
-                w_bm25 * bm25_norm.get(idx, 0) +
-                w_bert * bert_norm.get(idx, 0) +
-                w_pr * pr_norm.get(idx, 0)
+                weights["bm25"] * bm25_norm.get(idx, 0) +
+                weights["bert"] * bert_norm.get(idx, 0) +
+                weights["pagerank"] * pr_norm.get(idx, 0)
             )
-            combined_scores[idx] = score
+            combined_scores.append((idx, score))
         
-        # Sort by combined score and get top_k
-        sorted_results = sorted(
-            combined_scores.items(), 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:top_k]
+        return combined_scores
+    
+    def search_bm25(self, query: str, top_k: int = 10) -> List[Dict]:
+        """
+        BM25 search - Stage 1 only (no re-ranking).
+        
+        Args:
+            query: Search query string
+            top_k: Number of results to return
+            
+        Returns:
+            List of result dictionaries
+        """
+        # Check cache
+        cache_key = self._get_cache_key(query, "bm25", top_k)
+        cached = self._get_from_cache(cache_key)
+        if cached is not None:
+            return cached
+        
+        # Normalize query
+        normalized_query = normalize_and_truncate_query(query)
+        
+        # Stage 1: Get BM25 candidates
+        candidates = self._get_bm25_candidates(normalized_query, candidate_pool_size=top_k)
         
         # Format results
         formatted = [
-            self._format_result(idx, score, "hybrid") 
-            for idx, score in sorted_results
+            self._format_result(idx, score, "bm25")
+            for idx, score in candidates[:top_k]
         ]
-        return [r for r in formatted if r is not None]
+        formatted = [r for r in formatted if r is not None]
+        
+        # Cache and return
+        self._add_to_cache(cache_key, formatted)
+        return formatted
+    
+    def search_bert(self, query: str, top_k: int = 10) -> List[Dict]:
+        """
+        BERT search - Stage 1 (BM25 candidates) + Stage 2 (BERT re-ranking).
+        
+        Args:
+            query: Search query string
+            top_k: Number of results to return
+            
+        Returns:
+            List of result dictionaries
+        """
+        # Check cache
+        cache_key = self._get_cache_key(query, "bert", top_k)
+        cached = self._get_from_cache(cache_key)
+        if cached is not None:
+            return cached
+        
+        # Normalize query
+        normalized_query = normalize_and_truncate_query(query)
+        
+        # Stage 1: Get BM25 candidates
+        candidates = self._get_bm25_candidates(normalized_query)
+        
+        # Stage 2: Re-rank with BERT (on candidates only!)
+        reranked = self._rerank_with_bert(normalized_query, candidates)
+        
+        # Sort by BERT score and take top_k
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        
+        # Format results
+        formatted = [
+            self._format_result(idx, score, "bert")
+            for idx, score in reranked[:top_k]
+        ]
+        formatted = [r for r in formatted if r is not None]
+        
+        # Cache and return
+        self._add_to_cache(cache_key, formatted)
+        return formatted
+    
+    def search_pagerank(self, query: str, top_k: int = 10) -> List[Dict]:
+        """
+        PageRank search - Stage 1 (BM25 candidates) + Stage 2 (PageRank re-weighting).
+        
+        Args:
+            query: Search query string
+            top_k: Number of results to return
+            
+        Returns:
+            List of result dictionaries
+        """
+        # Check cache
+        cache_key = self._get_cache_key(query, "pagerank", top_k)
+        cached = self._get_from_cache(cache_key)
+        if cached is not None:
+            return cached
+        
+        # Normalize query
+        normalized_query = normalize_and_truncate_query(query)
+        
+        # Stage 1: Get BM25 candidates
+        candidates = self._get_bm25_candidates(normalized_query)
+        
+        # Stage 2: Re-weight with PageRank (on candidates only!)
+        reranked = self._rerank_with_pagerank(candidates)
+        
+        # Sort by combined score and take top_k
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        
+        # Format results
+        formatted = [
+            self._format_result(idx, score, "pagerank")
+            for idx, score in reranked[:top_k]
+        ]
+        formatted = [r for r in formatted if r is not None]
+        
+        # Cache and return
+        self._add_to_cache(cache_key, formatted)
+        return formatted
+    
+    def search_hybrid(self, query: str, top_k: int = 10) -> List[Dict]:
+        """
+        Hybrid search - Stage 1 (BM25 candidates) + Stage 2 (Hybrid re-ranking).
+        
+        Args:
+            query: Search query string
+            top_k: Number of results to return
+            
+        Returns:
+            List of result dictionaries
+        """
+        # Check cache
+        cache_key = self._get_cache_key(query, "hybrid", top_k)
+        cached = self._get_from_cache(cache_key)
+        if cached is not None:
+            return cached
+        
+        # Normalize query
+        normalized_query = normalize_and_truncate_query(query)
+        
+        # Stage 1: Get BM25 candidates
+        candidates = self._get_bm25_candidates(normalized_query)
+        
+        # Stage 2: Hybrid re-ranking (on candidates only!)
+        reranked = self._rerank_hybrid(normalized_query, candidates)
+        
+        # Sort by hybrid score and take top_k
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        
+        # Format results
+        formatted = [
+            self._format_result(idx, score, "hybrid")
+            for idx, score in reranked[:top_k]
+        ]
+        formatted = [r for r in formatted if r is not None]
+        
+        # Cache and return
+        self._add_to_cache(cache_key, formatted)
+        return formatted
+
+
+# Backward compatibility alias
+PaperSearchEngine = SearchEngine

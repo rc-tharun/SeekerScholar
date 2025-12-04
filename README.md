@@ -18,8 +18,11 @@ seekerscholar/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── engine.py      # PaperSearchEngine class
-│   │   └── api.py         # FastAPI application
+│   │   ├── api.py         # FastAPI application and endpoints
+│   │   ├── engine.py      # SearchEngine class (2-stage retrieval)
+│   │   ├── config.py      # Configuration management
+│   │   ├── data_loader.py # Data file loading and downloading
+│   │   └── pdf_utils.py   # PDF/document text extraction
 │   ├── main.py            # Entry point
 │   ├── requirements.txt   # Python dependencies
 │   └── Dockerfile         # Docker configuration
@@ -132,7 +135,7 @@ Health check endpoint.
 ```
 
 ### `POST /search`
-Search for papers.
+Search for papers using text query.
 
 **Request Body:**
 ```json
@@ -151,16 +154,50 @@ Search for papers.
 
 **Response:**
 ```json
-[
-  {
-    "id": 12345,
-    "title": "Paper Title",
-    "abstract": "Paper abstract...",
-    "link": "https://arxiv.org/search/?query=...",
-    "score": 0.9234,
-    "method": "hybrid"
-  }
-]
+{
+  "query": "graph neural networks",
+  "method": "hybrid",
+  "top_k": 10,
+  "results": [
+    {
+      "id": 12345,
+      "title": "Paper Title",
+      "abstract": "Paper abstract...",
+      "link": "https://arxiv.org/search/?query=...",
+      "score": 0.9234,
+      "method": "hybrid"
+    }
+  ]
+}
+```
+
+### `POST /search-from-pdf`
+Search for papers by uploading a PDF, DOCX, or TXT file.
+
+**Request:** multipart/form-data
+- `file`: PDF, DOCX, or TXT file (required)
+- `method`: Search method - "bm25", "bert", "pagerank", or "hybrid" (default: "hybrid")
+- `top_k`: Number of results (default: 10)
+
+**Note:** The backend extracts text from the file and uses only the **first 100 words** as the search query for faster performance, while returning the full extracted text in the response.
+
+**Response:**
+```json
+{
+  "extracted_query": "Full extracted text from file...",
+  "method": "hybrid",
+  "top_k": 10,
+  "results": [
+    {
+      "id": 12345,
+      "title": "Paper Title",
+      "abstract": "Paper abstract...",
+      "link": "https://arxiv.org/search/?query=...",
+      "score": 0.9234,
+      "method": "hybrid"
+    }
+  ]
+}
 ```
 
 ### `GET /search`
@@ -327,26 +364,30 @@ docker run -p 8000:8000 -v $(pwd)/../data:/app/data paper-search-backend
 
 ## Performance
 
-The search engine has been optimized for low latency:
+The search engine has been optimized for low latency using a 2-stage retrieval pipeline:
 
-### Optimizations
+### Architecture
 
-1. **FAISS for BERT Search**: BERT semantic search uses FAISS (Facebook AI Similarity Search) for fast approximate nearest neighbor search. This provides sub-second query times even with large embedding corpora.
+1. **2-Stage Retrieval Pipeline**:
+   - **Stage 1**: Fast BM25 candidate generation (always runs first, retrieves top 300 candidates)
+   - **Stage 2**: Optional lightweight re-ranking on the small candidate set only
+   - This ensures all methods are fast, with neural models only processing ~300 documents instead of the full corpus
 
-2. **Precomputed PageRank Scores**: Base PageRank scores are precomputed at startup and stored in memory. Query-specific personalization is applied efficiently using vectorized operations.
+2. **Precomputed PageRank Scores**: PageRank scores are precomputed at startup and stored in memory for fast re-weighting.
 
-3. **Vectorized Operations**: BM25 and hybrid search use NumPy vectorized operations instead of Python loops for faster computation.
+3. **Query Truncation**: Queries are normalized and truncated to 2048 characters to ensure consistent performance regardless of input length.
 
-4. **Query Caching**: An in-memory LRU cache (256 entries) caches search results for frequently repeated queries, providing near-instant responses for cached queries.
+4. **PDF Upload Optimization**: File uploads use only the **first 100 words** of extracted text as the search query, significantly speeding up searches for long documents.
 
-5. **Text Extraction Limits**: File uploads (PDF, DOCX, TXT) are limited to the first 4000 characters to prevent very long documents from slowing down BERT encoding.
+5. **Query Caching**: An in-memory LRU cache (256 entries) caches search results for frequently repeated queries, providing near-instant responses for cached queries.
 
 6. **Efficient Model Loading**: All models and embeddings are loaded once at startup, not per-request.
 
 ### Performance Characteristics
 
-- **BERT Search**: Typically < 100ms on CPU for top_k=10
 - **BM25 Search**: Typically < 50ms for top_k=10
+- **BERT Search**: Typically < 150ms for top_k=10 (only processes ~300 candidates)
+- **PageRank Search**: Typically < 60ms for top_k=10
 - **Hybrid Search**: Typically < 200ms for top_k=10
 - **Cached Queries**: < 10ms
 
@@ -363,16 +404,6 @@ gunicorn app.api:app -k uvicorn.workers.UvicornWorker -w 2 --bind 0.0.0.0:8000
 ```
 
 **Note**: When using multiple workers, each worker will load its own copy of the models and embeddings. Ensure sufficient memory (recommended: 4GB+ per worker).
-
-### Logging
-
-The system logs performance metrics for each search query:
-- Query latency (total time)
-- Method used (BM25, BERT, PageRank, Hybrid)
-- Number of results returned
-- File extraction time (for file uploads)
-
-Logs are output at INFO level and can be configured via Python's logging module.
 
 ## Development Notes
 

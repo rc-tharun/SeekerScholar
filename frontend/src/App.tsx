@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef } from 'react'
 import './App.css'
 
 interface SearchResult {
@@ -10,31 +10,18 @@ interface SearchResult {
   method: string
 }
 
-interface FileSearchResponse {
+interface SearchResponse {
+  query: string
+  method: string
+  top_k: number
+  results: SearchResult[]
+}
+
+interface PdfSearchResponse {
   extracted_query: string
-  mode: "bert" | "hybrid"
-  results: SearchResult[]
-}
-
-interface MethodEvaluation {
   method: string
-  teacher_ndcg_at_10: number
-  teacher_precision_at_10: number
-  teacher_top1_score: number
-  num_results: number
-}
-
-interface SearchWithEvaluationResponse {
+  top_k: number
   results: SearchResult[]
-  method: string
-  evaluations: MethodEvaluation[]
-}
-
-interface FileSearchWithEvaluationResponse {
-  extracted_query: string
-  results: SearchResult[]
-  method: string
-  evaluations: MethodEvaluation[]
 }
 
 // API base URL: use VITE_API_BASE_URL if set, otherwise fallback to VITE_API_URL, then localhost
@@ -48,18 +35,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [extractedQuery, setExtractedQuery] = useState<string | null>(null)
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
-  const [evaluations, setEvaluations] = useState<MethodEvaluation[]>([])
-  const [teacherModelName, setTeacherModelName] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const isCancelledRef = useRef<boolean>(false)
-
-  // Fetch teacher model name on component mount
-  useEffect(() => {
-    fetch(`${API_BASE_URL}/config/teacher-model`)
-      .then(res => res.json())
-      .then(data => setTeacherModelName(data.teacher_model_name))
-      .catch(err => console.error('Failed to fetch teacher model name:', err))
-  }, [])
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,14 +44,12 @@ function App() {
 
     // Cancel previous in-flight request (if any)
     if (abortRef.current) {
-      console.log('Cancelling previous request before starting new one')
       abortRef.current.abort()
       abortRef.current = null
     }
 
     // Reset cancellation flag
     isCancelledRef.current = false
-    console.log('Starting new search, query:', query.trim())
 
     // Create new AbortController for this request
     const controller = new AbortController()
@@ -84,11 +59,9 @@ function App() {
     setError(null)
     setResults([])
     setExtractedQuery(null)
-    setEvaluations([])
 
     try {
-      // Use the new endpoint that includes evaluation
-      const response = await fetch(`${API_BASE_URL}/search-with-evaluation`, {
+      const response = await fetch(`${API_BASE_URL}/search`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,17 +84,15 @@ function App() {
         throw new Error(errorData.detail || 'Search failed')
       }
 
-      const data: SearchWithEvaluationResponse = await response.json()
+      const data: SearchResponse = await response.json()
       
       // Only update state if not cancelled and controller is still current
       if (!isCancelledRef.current && abortRef.current === controller && !controller.signal.aborted) {
         setResults(data.results)
-        setEvaluations(data.evaluations)
       }
     } catch (err: any) {
       // Handle abort gracefully - don't show error if user cancelled
       if (err.name === 'AbortError' || controller.signal.aborted || isCancelledRef.current) {
-        console.log('Search aborted by user')
         return // Exit early, don't update any state
       } else {
         // Only set error if not cancelled and controller is still current
@@ -146,7 +117,6 @@ function App() {
   }
 
   const handleCancelSearch = () => {
-    console.log('Cancel button clicked, abortRef.current:', abortRef.current, 'loading:', loading)
     
     if (abortRef.current) {
       const controller = abortRef.current
@@ -156,7 +126,6 @@ function App() {
       
       // Abort the HTTP request
       controller.abort()
-      console.log('Request aborted, signal.aborted:', controller.signal.aborted)
       
       // Immediately clear loading state - force UI update
       setLoading(false)
@@ -164,16 +133,12 @@ function App() {
       
       // Clear results to prevent stale data from cancelled request
       setResults([])
-      setEvaluations([])
       setExtractedQuery(null)
       
       // Clear the ref AFTER setting loading to false
       abortRef.current = null
-      
-      console.log('Cancel complete - loading should be false now')
     } else {
       // Even if no controller, clear loading state (safety fallback)
-      console.log('No active request to cancel, but clearing loading state')
       setLoading(false)
       setError(null)
     }
@@ -194,7 +159,6 @@ function App() {
     // Cancel previous in-flight request (if any)
     if (abortRef.current) {
       abortRef.current.abort()
-      console.log('Previous request aborted by new file upload.')
     }
 
     // Create new AbortController for this request
@@ -207,16 +171,15 @@ function App() {
     setError(null)
     setResults([])
     setExtractedQuery(null)
-    setEvaluations([]) // Clear evaluations for new file upload
     setQuery('') // Clear text query
 
     try {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('method', method) // Use the selected method from dropdown
+      formData.append('method', method)
       formData.append('top_k', '10')
 
-      const response = await fetch(`${API_BASE_URL}/search-file-with-evaluation`, {
+      const response = await fetch(`${API_BASE_URL}/search-from-pdf`, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -224,7 +187,6 @@ function App() {
 
       // Check if request was aborted before processing response
       if (controller.signal.aborted || isCancelledRef.current) {
-        console.log('File search response received after cancellation, ignoring.')
         return
       }
 
@@ -233,18 +195,16 @@ function App() {
         throw new Error(errorData.detail || 'File search failed')
       }
 
-      const data: FileSearchWithEvaluationResponse = await response.json()
+      const data: PdfSearchResponse = await response.json()
       
       // Only update state if this controller is still the current one and not aborted
       if (abortRef.current === controller && !controller.signal.aborted && !isCancelledRef.current) {
         setExtractedQuery(data.extracted_query)
         setResults(data.results)
-        setEvaluations(data.evaluations) // Set evaluations from file search
       }
     } catch (err: any) {
       // Handle abort gracefully - don't show error if user cancelled
       if (err.name === 'AbortError' || controller.signal.aborted || isCancelledRef.current) {
-        console.log('File search aborted by user or new file upload started.')
         return // Exit early, don't update any state
       } else {
         // Only set error if this controller is still the current one and not explicitly cancelled
@@ -285,6 +245,17 @@ function App() {
               className="search-input"
               disabled={loading}
             />
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="method-select"
+              disabled={loading}
+            >
+              <option value="bm25">BM25</option>
+              <option value="bert">BERT</option>
+              <option value="pagerank">PageRank</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
             {loading ? (
               <button 
                 type="button" 
@@ -303,21 +274,6 @@ function App() {
               </button>
             )}
           </div>
-
-          <div className="method-selector">
-            <label>Search Method:</label>
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="method-select"
-              disabled={loading}
-            >
-              <option value="hybrid">Hybrid (Recommended)</option>
-              <option value="bm25">BM25 (Keyword)</option>
-              <option value="bert">BERT (Semantic)</option>
-              <option value="pagerank">PageRank (Authority)</option>
-            </select>
-          </div>
         </form>
 
         <div className="file-upload-section">
@@ -328,14 +284,27 @@ function App() {
             <label htmlFor="file-upload" className="file-upload-label">
               📄 Upload file (PDF, DOCX, TXT) to find similar papers
             </label>
-            <input
-              id="file-upload"
-              type="file"
-              accept=".pdf,.docx,.doc,.txt"
-              onChange={handleFileUpload}
-              className="file-upload-input"
-              disabled={loading}
-            />
+            <div className="file-upload-with-method">
+              <input
+                id="file-upload"
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                onChange={handleFileUpload}
+                className="file-upload-input"
+                disabled={loading}
+              />
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="method-select"
+                disabled={loading}
+              >
+                <option value="bm25">BM25</option>
+                <option value="bert">BERT</option>
+                <option value="pagerank">PageRank</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </div>
             {uploadedFile && (
               <div className="file-name">
                 Selected: {uploadedFile.name}
@@ -351,71 +320,6 @@ function App() {
               {extractedQuery.length > 500
                 ? `${extractedQuery.substring(0, 500)}...`
                 : extractedQuery}
-            </div>
-          </div>
-        )}
-
-        {evaluations.length > 0 && (
-          <div className="metrics-panel">
-            <h3>
-              📊 Method Comparison
-              {teacherModelName && (
-                <span className="teacher-model-name" title={`Cross-Encoder judge model used for evaluation: ${teacherModelName}`}>
-                  {' '}(Cross-Encoder Judge: {teacherModelName})
-                </span>
-              )}
-            </h3>
-            {(() => {
-              const bestModel = evaluations.reduce((best, current) => 
-                current.teacher_ndcg_at_10 > best.teacher_ndcg_at_10 ? current : best
-              )
-              return (
-                <p className="metrics-summary">
-                  <strong>
-                    Best model for this query (NDCG@10 with {teacherModelName || 'Cross-Encoder'}): {bestModel.method.toUpperCase()}
-                  </strong>
-                  {' '}(NDCG@10: {bestModel.teacher_ndcg_at_10.toFixed(3)})
-                </p>
-              )
-            })()}
-            <p className="metrics-description">
-              Ranking metrics from a pre-trained cross-encoder teacher model. NDCG@10 measures ranking quality, Precision@10 measures relevance, and Top1 is the score of the first result.
-            </p>
-            <div className="metrics-grid">
-              {evaluations.map((evaluation) => {
-                const isSelected = evaluation.method === method
-                const isBest = evaluation.teacher_ndcg_at_10 === Math.max(...evaluations.map(e => e.teacher_ndcg_at_10))
-                return (
-                  <div 
-                    key={evaluation.method} 
-                    className={`metric-card ${isSelected ? 'selected' : ''} ${isBest ? 'best' : ''}`}
-                  >
-                    <div className="metric-header">
-                      <span className="metric-method">{evaluation.method.toUpperCase()}</span>
-                      {isSelected && <span className="metric-badge">Selected</span>}
-                      {isBest && <span className="metric-badge best-badge">🏆 Best</span>}
-                    </div>
-                    <div className="metric-scores">
-                      <div className="metric-score">
-                        <span className="score-label">NDCG@10:</span>
-                        <span className="score-value">{evaluation.teacher_ndcg_at_10.toFixed(3)}</span>
-                      </div>
-                      <div className="metric-score">
-                        <span className="score-label">Precision@10:</span>
-                        <span className="score-value">{evaluation.teacher_precision_at_10.toFixed(3)}</span>
-                      </div>
-                      <div className="metric-score">
-                        <span className="score-label">Top1 Score:</span>
-                        <span className="score-value">{evaluation.teacher_top1_score.toFixed(3)}</span>
-                      </div>
-                      <div className="metric-score">
-                        <span className="score-label">Results:</span>
-                        <span className="score-value">{evaluation.num_results}</span>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
             </div>
           </div>
         )}
@@ -477,4 +381,3 @@ function App() {
 }
 
 export default App
-

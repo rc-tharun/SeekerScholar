@@ -95,6 +95,43 @@
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
 }
 
+.compare-methods-section {
+  margin: 20px 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.compare-button {
+  padding: 12px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.compare-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.compare-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.compare-note {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: #666;
+  font-style: italic;
+}
+
 .method-selector {
   display: flex;
   align-items: center;
@@ -307,6 +344,28 @@
 
 .file-upload-input {
   display: none;
+}
+
+.file-upload-with-method {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.file-upload-with-method .method-select {
+  padding: 10px 14px;
+  font-size: 0.95rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  background: white;
+}
+
+.file-upload-with-method .method-select:focus {
+  border-color: #667eea;
 }
 
 .file-name {
