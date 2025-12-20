@@ -4,11 +4,21 @@
  */
 
 // Get API base URL from environment variable
-// Normalize: remove trailing slash and handle missing env var
+// Production default: https://seekerscholar-1.onrender.com
+// Development: falls back to localhost for local testing
 const getBaseUrl = (): string => {
-  const base = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  // Remove trailing slash if present
-  return base.replace(/\/+$/, '')
+  const base = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL
+  
+  // In production, use env var or default to Render backend
+  if (import.meta.env.PROD) {
+    const prodBase = base || 'https://seekerscholar-1.onrender.com'
+    // Remove trailing slash if present
+    return prodBase.replace(/\/+$/, '')
+  }
+  
+  // Development: fallback to localhost
+  const devBase = base || 'http://localhost:8000'
+  return devBase.replace(/\/+$/, '')
 }
 
 const BASE_URL = getBaseUrl()

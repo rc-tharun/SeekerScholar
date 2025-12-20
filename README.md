@@ -111,10 +111,18 @@ VITE_API_BASE_URL=http://localhost:8000
 ```
 Or use `VITE_API_URL` for backward compatibility.
 
-**For Production (Vercel):**
-Set the following environment variable in Vercel dashboard:
-- `VITE_API_BASE_URL`: Backend API URL (e.g., `https://seekerscholar-1.onrender.com`)
-  - **Important:** After changing Vercel environment variables, you must redeploy for changes to take effect.
+**For Production (Vercel) - REQUIRED:**
+⚠️ **CRITICAL:** You must set `VITE_API_BASE_URL` in Vercel for production deployment.
+
+1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
+2. Add environment variable:
+   - **Name:** `VITE_API_BASE_URL`
+   - **Value:** `https://seekerscholar-1.onrender.com` (or your backend URL)
+   - **Environment:** Production (and Preview if desired)
+3. **Redeploy** your project after adding the variable
+   - The app will fail in production if this variable is not set (no localhost fallback)
+
+**Note:** The frontend code requires `VITE_API_BASE_URL` in production and will throw an error if missing. This prevents accidental localhost calls in production.
 
 **Backend:**
 Optional environment variables (create `.env` in `backend/` or set in deployment platform):
@@ -318,11 +326,13 @@ The frontend is a Vite React app and builds without backend artifacts.
    - **Output Directory:** `dist` (auto-detected)
    - **Install Command:** `npm install` (auto-detected)
 
-2. **Set environment variables:**
+2. **Set environment variables (REQUIRED):**
    - `VITE_API_BASE_URL`: Your backend API URL (e.g., `https://seekerscholar-1.onrender.com`)
+     - **REQUIRED:** This variable must be set in production. The app will fail if missing.
      - Note: Also accepts `VITE_API_URL` for backward compatibility
      - **Important:** After setting or changing environment variables in Vercel, you must redeploy for changes to take effect
      - Go to Project Settings → Environment Variables in Vercel dashboard
+     - Set for Production environment (and Preview if desired)
 
 3. **Alternative: Deploy via Vercel CLI:**
    ```bash
