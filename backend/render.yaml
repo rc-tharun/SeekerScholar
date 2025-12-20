@@ -10,6 +10,8 @@ services:
         value: 3.11.0
       - key: DATA_DIR
         value: data
+      - key: FRONTEND_ORIGIN
+        value: https://seeker-scholar.vercel.app
       - key: BM25_URL
         value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
       - key: DF_URL

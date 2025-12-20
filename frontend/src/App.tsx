@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react'
 import './App.css'
+import { apiPost, apiPostFormData } from './lib/api'
 
 interface SearchResult {
   id: number
@@ -23,9 +24,6 @@ interface PdfSearchResponse {
   top_k: number
   results: SearchResult[]
 }
-
-// API base URL: use VITE_API_BASE_URL if set, otherwise fallback to VITE_API_URL, then localhost
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function App() {
   const [query, setQuery] = useState('')
@@ -61,30 +59,20 @@ function App() {
     setExtractedQuery(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      const data: SearchResponse = await apiPost<SearchResponse>(
+        '/search',
+        {
           query: query.trim(),
           method: method,
           top_k: 10,
-        }),
-        signal: controller.signal,
-      })
+        },
+        controller.signal
+      )
 
       // Check if cancelled before processing
       if (isCancelledRef.current || controller.signal.aborted) {
         return
       }
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Search failed')
-      }
-
-      const data: SearchResponse = await response.json()
       
       // Only update state if not cancelled and controller is still current
       if (!isCancelledRef.current && abortRef.current === controller && !controller.signal.aborted) {
@@ -179,23 +167,16 @@ function App() {
       formData.append('method', method)
       formData.append('top_k', '10')
 
-      const response = await fetch(`${API_BASE_URL}/search-from-pdf`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      })
-
       // Check if request was aborted before processing response
       if (controller.signal.aborted || isCancelledRef.current) {
         return
       }
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'File search failed')
-      }
-
-      const data: PdfSearchResponse = await response.json()
+      const data: PdfSearchResponse = await apiPostFormData<PdfSearchResponse>(
+        '/search-from-pdf',
+        formData,
+        controller.signal
+      )
       
       // Only update state if this controller is still the current one and not aborted
       if (abortRef.current === controller && !controller.signal.aborted && !isCancelledRef.current) {

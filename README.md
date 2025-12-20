@@ -104,17 +104,24 @@ The frontend will be available at `http://localhost:3000`
 
 ### Environment Variables
 
-**Frontend:**
-Create a `.env` file in the `frontend/` directory:
+**Frontend (Vite):**
+Create a `.env` file in the `frontend/` directory for local development:
 ```
 VITE_API_BASE_URL=http://localhost:8000
 ```
 Or use `VITE_API_URL` for backward compatibility.
 
+**For Production (Vercel):**
+Set the following environment variable in Vercel dashboard:
+- `VITE_API_BASE_URL`: Backend API URL (e.g., `https://seekerscholar-1.onrender.com`)
+  - **Important:** After changing Vercel environment variables, you must redeploy for changes to take effect.
+
 **Backend:**
 Optional environment variables (create `.env` in `backend/` or set in deployment platform):
-- `DATA_DIR`: Path to data directory (default: `../data`)
+- `DATA_DIR`: Path to data directory (default: `data` within backend directory)
 - `PORT`: Server port (default: `8000`, auto-set by Render)
+- `FRONTEND_ORIGIN`: Frontend origin URL for CORS (e.g., `https://seeker-scholar.vercel.app`)
+  - If not set, defaults to localhost origins for local development
 
 ## API Endpoints
 
@@ -268,9 +275,12 @@ services:
      - **Start Command:** `python scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port $PORT`
 
 3. **Environment Variables:**
-   - All required environment variables are set in `render.yaml`
+   - All required environment variables are set in `render.yaml`, including:
+     - `FRONTEND_ORIGIN`: Set to `https://seeker-scholar.vercel.app` for CORS
+     - `DATA_DIR`: Set to `data` (artifacts directory)
+     - Artifact download URLs (BM25_URL, DF_URL, GRAPH_URL, EMBEDDINGS_URL)
    - `PORT` is automatically set by Render (do not override)
-   - You can override artifact URLs via Render dashboard if needed
+   - You can override environment variables via Render dashboard if needed
 
 4. **Deploy:**
    - Render will automatically deploy on push
@@ -309,9 +319,10 @@ The frontend is a Vite React app and builds without backend artifacts.
    - **Install Command:** `npm install` (auto-detected)
 
 2. **Set environment variables:**
-   - `VITE_API_BASE_URL`: Your backend API URL (e.g., `https://your-backend.onrender.com`)
+   - `VITE_API_BASE_URL`: Your backend API URL (e.g., `https://seekerscholar-1.onrender.com`)
      - Note: Also accepts `VITE_API_URL` for backward compatibility
-     - **Important:** Point this to your deployed backend URL (Render, Fly.io, etc.)
+     - **Important:** After setting or changing environment variables in Vercel, you must redeploy for changes to take effect
+     - Go to Project Settings → Environment Variables in Vercel dashboard
 
 3. **Alternative: Deploy via Vercel CLI:**
    ```bash

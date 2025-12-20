@@ -136,13 +136,20 @@ async def startup_event():
         engine = None
 
 # Add CORS middleware
-# Allow origins from environment variable or default to all (for development)
-cors_origins = os.getenv("CORS_ORIGINS", "*")
-if cors_origins == "*":
-    allow_origins = ["*"]
+# Read allowed origin from FRONTEND_ORIGIN environment variable
+# If set, allow only that exact origin. Otherwise, allow localhost for local development.
+frontend_origin = os.getenv("FRONTEND_ORIGIN")
+if frontend_origin:
+    # Production: allow only the specified frontend origin
+    allow_origins = [frontend_origin]
 else:
-    # Split comma-separated origins
-    allow_origins = [origin.strip() for origin in cors_origins.split(",")]
+    # Development: allow localhost origins
+    allow_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",  # Vite default port
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
