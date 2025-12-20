@@ -47,12 +47,7 @@ seekerscholar/
 - Node.js 18+ (for frontend)
 - Precomputed data artifacts in `data/` directory
 
-**Note:** The data files (`df.pkl`, `bm25.pkl`, `embeddings.pt`, `graph.pkl`) are not included in this repository due to GitHub's file size limits. You need to:
-1. Generate them using the `ISR_Project.ipynb` notebook, OR
-2. Download them from a cloud storage location (if provided), OR
-3. Use your own precomputed data files
-
-Place all data files in the `data/` directory at the repository root.
+**Note:** Artifacts are not stored in GitHub; they are downloaded during build. The data files (`df.pkl`, `bm25.pkl`, `embeddings.pt`, `graph.pkl`) are automatically downloaded from GitHub Releases (tag: `v1.0.0-models`) during deployment or first run. See [Deployment](#deployment) section for details.
 
 ## Local Development
 
@@ -212,39 +207,15 @@ Example: `GET /search?query=neural%20networks&method=bert&top_k=5`
 
 ### Backend Deployment (Render)
 
-#### Step 1: Prepare Data Files
+Artifacts are automatically downloaded from GitHub Releases during startup. No need to commit large files to GitHub!
 
-Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. Choose one option:
+**Artifact Source:** Artifacts are hosted in GitHub Releases (tag: `v1.0.0-models`) and downloaded automatically at runtime:
+- `bm25.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
+- `df.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+- `graph.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
+- `embeddings.pt` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
 
-**Option A: Cloud Storage (Recommended)**
-1. Upload your data files to one of these services:
-   - **Google Drive**: Upload files, get shareable links, use `gdown` to download
-   - **AWS S3**: Upload to S3 bucket, use `aws s3 cp` in build script
-   - **Dropbox/OneDrive**: Upload and get direct download URLs
-   - **Any web server**: Host files and get direct URLs
-
-2. Set environment variables in Render with download URLs:
-   - `DATA_DF_URL`: URL to download `df.pkl`
-   - `DATA_BM25_URL`: URL to download `bm25.pkl`
-   - `DATA_EMBEDDINGS_URL`: URL to download `embeddings.pt`
-   - `DATA_GRAPH_URL`: URL to download `graph.pkl`
-
-**Option B: Render Persistent Disk**
-1. Create a persistent disk in Render
-2. SSH into your Render instance
-3. Upload data files via SCP:
-   ```bash
-   scp data/*.pkl data/*.pt root@your-render-instance:/path/to/data/
-   ```
-4. Set `DATA_DIR` environment variable to the disk mount point
-
-**Option C: Compress and Split Files**
-1. Compress files: `gzip data/*.pkl data/*.pt`
-2. Split large files: `split -b 50M data/df.pkl.gz data/df.pkl.gz.part`
-3. Upload parts to GitHub or cloud storage
-4. Create build script to reassemble during deployment
-
-#### Step 2: Configure Render Service
+#### Step 1: Configure Render Service
 
 1. **Create a Render account** and create a new Web Service
 
@@ -253,56 +224,63 @@ Since data files exceed GitHub's 100MB limit, you need to host them elsewhere. C
    - **Environment:** Python 3.11
    - **Build Command:** 
      ```bash
-     pip install -r requirements.txt && python download_data.py && python check_data.py
+     pip install -r requirements.txt
      ```
-     The `check_data.py` script verifies all files were downloaded correctly. Check build logs to confirm.
-     (Or use `bash download_data.sh` if using shell script)
-   - **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
+   - **Start Command:** 
+     ```bash
+     bash start.sh
+     ```
+     Or directly:
+     ```bash
+     python3 scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port $PORT
+     ```
    
-   **Important:** The build command downloads data files. Make sure the build completes successfully before the service starts.
+   The start script automatically downloads artifacts from GitHub Releases if missing, then starts the server.
 
-3. **Set environment variables:**
-   - `PORT`: Automatically set by Render (do not override)
-   - `DATA_DIR`: (Optional) Path to data directory. Defaults to `../data` relative to backend root
-     - For Render with root directory `backend`, use `../data` (this points to repo root/data)
-     - Alternative: Use absolute path like `/opt/render/project/src/data` if needed
-   - `DATA_DF_URL`: (Optional, if using custom URLs) URL to download df.pkl
-   - `DATA_BM25_URL`: (Optional, if using custom URLs) URL to download bm25.pkl
-   - `DATA_EMBEDDINGS_URL`: (Optional, if using custom URLs) URL to download embeddings.pt
-   - `DATA_GRAPH_URL`: (Optional, if using custom URLs) URL to download graph.pkl
+3. **Set environment variables (optional):**
    
-   **Note:** If you don't set the DATA_*_URL variables, the script will use the pre-configured Google Drive file IDs.
+   **Required:**
+   - `PORT`: Automatically set by Render (do not override)
+   
+   **Data Directory (Optional):**
+   - `DATA_DIR`: Path to data directory (defaults to `backend/data`)
+   
+   **Artifact URLs (Optional - override default GitHub Releases URLs):**
+   - `BM25_URL`: Custom URL to download `bm25.pkl`
+   - `DF_URL`: Custom URL to download `df.pkl`
+   - `GRAPH_URL`: Custom URL to download `graph.pkl`
+   - `EMBEDDINGS_URL`: Custom URL to download `embeddings.pt`
+   
+   **Note:** If environment variables are not set, the script uses the default GitHub Releases URLs listed above.
 
 4. **Deploy:**
    - Connect your GitHub repository
    - Render will automatically deploy on push
+   - Check build logs to verify artifact downloads
 
-**Health Check:** Render will use `GET /health` endpoint for health checks.
-
-#### Quick Setup with Google Drive (Already Configured!)
-
-✅ **Your Google Drive files are already configured!**
-
-The download scripts are pre-configured with your Google Drive file IDs:
-- `df.pkl`: 1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h
-- `bm25.pkl`: 1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y
-- `embeddings.pt`: 12e382jL02z56gz5fPOINxBxHYVTBqIBb
-- `graph.pkl`: 1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU
-
-**Render Configuration:**
-- **Build Command:** `pip install -r requirements.txt && python download_data.py`
-- **Start Command:** `uvicorn app.api:app --host 0.0.0.0 --port $PORT`
-
-The script will automatically download all data files from Google Drive during the build process.
-
-**Important:** Make sure your Google Drive files are set to "Anyone with the link can view" for the download to work.
+**Health Check:** The `/health` endpoint reports artifact status. Render will use `GET /health` for health checks. Response includes:
+```json
+{
+  "status": "ok",
+  "message": "API is healthy",
+  "artifacts": {
+    "bm25": true,
+    "df": true,
+    "graph": true,
+    "embeddings": true
+  },
+  "data_dir": "/path/to/data"
+}
+```
 
 ### Frontend Deployment (Vercel)
+
+The frontend is a Vite React app and builds without backend artifacts.
 
 1. **Deploy via Vercel Dashboard (Recommended):**
    - Connect your GitHub repository
    - **Root Directory:** `frontend`
-   - **Framework Preset:** Vite
+   - **Framework Preset:** Vite (auto-detected)
    - **Build Command:** `npm run build` (auto-detected)
    - **Output Directory:** `dist` (auto-detected)
    - **Install Command:** `npm install` (auto-detected)
@@ -310,6 +288,7 @@ The script will automatically download all data files from Google Drive during t
 2. **Set environment variables:**
    - `VITE_API_BASE_URL`: Your backend API URL (e.g., `https://your-backend.onrender.com`)
      - Note: Also accepts `VITE_API_URL` for backward compatibility
+     - **Important:** Point this to your deployed backend URL (Render, Fly.io, etc.)
 
 3. **Alternative: Deploy via Vercel CLI:**
    ```bash

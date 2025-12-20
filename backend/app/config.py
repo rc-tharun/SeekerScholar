@@ -42,8 +42,7 @@ class Config:
         
         Priority:
         1. DATA_DIR environment variable (if set)
-        2. ../data relative to backend root
-        3. ./data in backend root (fallback)
+        2. backend/data (default)
         
         Returns:
             Absolute path to data directory
@@ -65,18 +64,23 @@ class Config:
             cls.DATA_DIR = str(resolved.resolve())
             return cls.DATA_DIR
         
-        # Default: ../data relative to backend root
-        data_dir_candidate = backend_root.parent / "data"
-        data_dir_candidate = data_dir_candidate.resolve()
-        
-        # Check if this resolves to /data (system root - wrong)
-        if str(data_dir_candidate) == "/data" or not data_dir_candidate.parent.exists():
-            # Fallback: ./data in backend root
-            cls.DATA_DIR = str((backend_root / "data").resolve())
-        else:
-            cls.DATA_DIR = str(data_dir_candidate)
-        
+        # Default: backend/data
+        cls.DATA_DIR = str((backend_root / "data").resolve())
         return cls.DATA_DIR
+    
+    @classmethod
+    def artifact_path(cls, filename: str) -> str:
+        """
+        Get the full path to an artifact file.
+        
+        Args:
+            filename: Name of the artifact file (e.g., "bm25.pkl")
+            
+        Returns:
+            Absolute path to the artifact file
+        """
+        data_dir = cls.get_data_dir()
+        return os.path.join(data_dir, filename)
     
     @classmethod
     def validate_top_k(cls, top_k: int) -> None:

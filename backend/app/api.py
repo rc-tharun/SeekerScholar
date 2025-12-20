@@ -71,6 +71,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Literal
 import logging
+import os
 
 from app.config import Config
 from app.engine import SearchEngine, normalize_and_truncate_query
@@ -89,17 +90,58 @@ app = FastAPI(title="SeekerScholar API", version="1.0.0")
 
 # Ensure data files exist
 data_dir = Config.get_data_dir()
+logger.info(f"{'='*60}")
+logger.info(f"SeekerScholar Backend Starting")
+logger.info(f"{'='*60}")
 logger.info(f"Data directory: {data_dir}")
+logger.info(f"Absolute path: {os.path.abspath(data_dir)}")
+
+# Check artifact status before attempting to load
+from app.data_loader import check_data_files
+all_exist, missing_files = check_data_files(data_dir)
+if all_exist:
+    logger.info("✓ All required artifacts present")
+    for filename in ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]:
+        filepath = os.path.join(data_dir, filename)
+        if os.path.exists(filepath):
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            logger.info(f"  ✓ {filename}: {size_mb:.2f} MB")
+else:
+    logger.warning(f"⚠ Missing artifacts: {', '.join(missing_files)}")
+    logger.info("Attempting to download missing artifacts...")
+
 ensure_data_files(data_dir)
+
+# Verify again after download attempt
+all_exist, still_missing = check_data_files(data_dir)
+if not all_exist:
+    logger.error(f"✗ ERROR: Required artifacts still missing: {', '.join(still_missing)}")
+    logger.error("Server will start but search functionality may not work.")
+else:
+    logger.info("✓ All artifacts verified")
 
 # Initialize search engine
 logger.info("Initializing search engine...")
-engine = SearchEngine(data_dir=data_dir, cache_size=Config.CACHE_SIZE)
+try:
+    engine = SearchEngine(data_dir=data_dir, cache_size=Config.CACHE_SIZE)
+    logger.info("✓ Search engine initialized successfully")
+except Exception as e:
+    logger.error(f"✗ ERROR: Failed to initialize search engine: {e}")
+    logger.error("Server will start but search endpoints will fail.")
+    raise
 
 # Add CORS middleware
+# Allow origins from environment variable or default to all (for development)
+cors_origins = os.getenv("CORS_ORIGINS", "*")
+if cors_origins == "*":
+    allow_origins = ["*"]
+else:
+    # Split comma-separated origins
+    allow_origins = [origin.strip() for origin in cors_origins.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend domain
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -132,6 +174,8 @@ class SearchResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     message: str
+    artifacts: dict[str, bool]
+    data_dir: str
 
 
 class PdfSearchResponse(BaseModel):
@@ -150,8 +194,37 @@ def root():
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    """Health check endpoint."""
-    return {"status": "ok", "message": "API is healthy"}
+    """
+    Health check endpoint.
+    Returns API status and artifact availability (without exposing file contents).
+    """
+    from app.data_loader import check_data_files
+    
+    data_dir = Config.get_data_dir()
+    all_exist, missing_files = check_data_files(data_dir)
+    
+    # Check individual artifacts
+    artifacts = {
+        "bm25": os.path.exists(Config.artifact_path("bm25.pkl")),
+        "df": os.path.exists(Config.artifact_path("df.pkl")),
+        "graph": os.path.exists(Config.artifact_path("graph.pkl")),
+        "embeddings": os.path.exists(Config.artifact_path("embeddings.pt")),
+    }
+    
+    if all_exist:
+        return {
+            "status": "ok",
+            "message": "API is healthy",
+            "artifacts": artifacts,
+            "data_dir": data_dir
+        }
+    else:
+        return {
+            "status": "degraded",
+            "message": "API is running but some artifacts are missing",
+            "artifacts": artifacts,
+            "data_dir": data_dir
+        }
 
 
 @app.post("/search", response_model=SearchResponse)

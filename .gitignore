@@ -54,10 +54,19 @@ Thumbs.db
 
 # Data (large files - use external storage or Git LFS)
 # These files exceed GitHub's 100MB limit
+data/
+backend/data/
+*.pkl
+*.pk
+*.pt
+*.bin
+*.safetensors
+*.onnx
 data/*.pkl
 data/*.pt
 data/*.pkl.gz
 data/*.pt.gz
+backend/data/*
 # Keep data directory structure but ignore contents
 !data/.gitkeep
 
