@@ -224,18 +224,14 @@ Artifacts are automatically downloaded from GitHub Releases during startup. No n
    - **Environment:** Python 3.11
    - **Build Command:** 
      ```bash
-     pip install -r requirements.txt
+     pip install -r requirements.txt && python3 scripts/download_artifacts.py
      ```
    - **Start Command:** 
      ```bash
-     bash start.sh
-     ```
-     Or directly:
-     ```bash
-     python3 scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port $PORT
+     uvicorn app.api:app --host 0.0.0.0 --port $PORT
      ```
    
-   The start script automatically downloads artifacts from GitHub Releases if missing, then starts the server.
+   **Important:** Artifacts are downloaded during the BUILD command, not the START command. This ensures the server binds to `$PORT` immediately, preventing "No open ports detected" errors.
 
 3. **Set environment variables (optional):**
    
@@ -243,7 +239,7 @@ Artifacts are automatically downloaded from GitHub Releases during startup. No n
    - `PORT`: Automatically set by Render (do not override)
    
    **Data Directory (Optional):**
-   - `DATA_DIR`: Path to data directory (defaults to `backend/data`)
+   - `DATA_DIR`: Path to data directory (defaults to `data` within backend directory)
    
    **Artifact URLs (Optional - override default GitHub Releases URLs):**
    - `BM25_URL`: Custom URL to download `bm25.pkl`

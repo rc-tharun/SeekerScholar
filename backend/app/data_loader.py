@@ -33,7 +33,8 @@ def check_data_files(data_dir: str) -> tuple[bool, List[str]]:
 
 def download_data_files(data_dir: str) -> bool:
     """
-    Download data files from Google Drive if they don't exist.
+    Download data files from GitHub Releases if they don't exist.
+    This function is deprecated - use scripts/download_artifacts.py instead.
     
     Args:
         data_dir: Directory to download files to
@@ -41,65 +42,18 @@ def download_data_files(data_dir: str) -> bool:
     Returns:
         True if all files downloaded successfully, False otherwise
     """
-    print(f"Downloading data files to: {data_dir}")
+    print(f"⚠ WARNING: download_data_files() is deprecated.")
+    print(f"Please use scripts/download_artifacts.py for artifact downloads.")
+    print(f"Checking if files already exist in: {data_dir}")
     
-    # Ensure directory exists
-    os.makedirs(data_dir, exist_ok=True)
-    
-    try:
-        # Import gdown
-        try:
-            import gdown
-        except ImportError:
-            print("Installing gdown...")
-            import subprocess
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "gdown"], 
-                capture_output=True
-            )
-            import gdown
-        
-        # Google Drive file IDs
-        gdrive_files = {
-            "df.pkl": "1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h",
-            "bm25.pkl": "1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y",
-            "embeddings.pt": "12e382jL02z56gz5fPOINxBxHYVTBqIBb",
-            "graph.pkl": "1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU",
-        }
-        
-        downloaded = []
-        failed = []
-        
-        for filename, file_id in gdrive_files.items():
-            output_path = os.path.join(data_dir, filename)
-            url = f"https://drive.google.com/uc?id={file_id}"
-            
-            try:
-                print(f"Downloading {filename}...")
-                gdown.download(url, output_path, quiet=False)
-                
-                if os.path.exists(output_path):
-                    size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                    print(f"✓ {filename}: {size_mb:.2f} MB")
-                    downloaded.append(filename)
-                else:
-                    print(f"✗ {filename}: Download completed but file not found")
-                    failed.append(filename)
-            except Exception as e:
-                print(f"✗ {filename}: Error - {e}")
-                failed.append(filename)
-        
-        if failed:
-            print(f"\nFailed to download: {', '.join(failed)}")
-            return False
-        
-        print(f"\n✓ Successfully downloaded all {len(downloaded)} files!")
+    # Just check if files exist, don't download
+    all_exist, missing_files = check_data_files(data_dir)
+    if all_exist:
+        print("✓ All data files found!")
         return True
-        
-    except Exception as e:
-        print(f"ERROR during download: {e}")
-        import traceback
-        traceback.print_exc()
+    else:
+        print(f"✗ Missing files: {', '.join(missing_files)}")
+        print(f"  Run: python3 scripts/download_artifacts.py")
         return False
 
 

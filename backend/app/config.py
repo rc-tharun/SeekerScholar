@@ -42,7 +42,7 @@ class Config:
         
         Priority:
         1. DATA_DIR environment variable (if set)
-        2. backend/data (default)
+        2. data (within backend directory, default)
         
         Returns:
             Absolute path to data directory
@@ -64,7 +64,7 @@ class Config:
             cls.DATA_DIR = str(resolved.resolve())
             return cls.DATA_DIR
         
-        # Default: backend/data
+        # Default: data (within backend directory)
         cls.DATA_DIR = str((backend_root / "data").resolve())
         return cls.DATA_DIR
     

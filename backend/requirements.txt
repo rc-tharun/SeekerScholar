@@ -12,6 +12,5 @@ transformers>=4.35.0
 python-multipart==0.0.6
 pypdf==4.0.1
 python-docx==1.1.0
-gdown>=4.7.0
 requests>=2.31.0
 

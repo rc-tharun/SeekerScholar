@@ -6,11 +6,12 @@ Downloads required data artifacts (df.pkl, bm25.pkl, embeddings.pt, graph.pkl)
 from GitHub Releases. Supports overriding URLs via environment variables.
 
 Features:
-- Idempotent: skips download if file already exists
+- Idempotent: skips download if file already exists and size > 0
 - Atomic writes: downloads to .tmp then renames
 - Progress tracking for large files
 - Validates non-zero file size
 - Clear logging
+- Exit non-zero if any artifact missing after attempts
 """
 import os
 import sys
@@ -55,11 +56,17 @@ def download_file(url: str, output_path: str) -> Tuple[bool, str]:
     try:
         import requests
         
-        # Check if file already exists
+        # Check if file already exists and has non-zero size (idempotent)
         if os.path.exists(output_path):
-            size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
-            return True, "File already exists"
+            file_size = os.path.getsize(output_path)
+            if file_size > 0:
+                size_mb = file_size / (1024 * 1024)
+                print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
+                return True, "File already exists"
+            else:
+                # File exists but is empty, remove it and re-download
+                os.remove(output_path)
+                print(f"  ⚠ {os.path.basename(output_path)} exists but is empty, re-downloading...")
         
         print(f"  Downloading {os.path.basename(output_path)} from {url}...")
         
@@ -105,9 +112,11 @@ def download_file(url: str, output_path: str) -> Tuple[bool, str]:
             print(f"  Downloading {os.path.basename(output_path)} (using urllib)...")
             
             if os.path.exists(output_path):
-                size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
-                return True, "File already exists"
+                file_size = os.path.getsize(output_path)
+                if file_size > 0:
+                    size_mb = file_size / (1024 * 1024)
+                    print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
+                    return True, "File already exists"
             
             tmp_path = output_path + ".tmp"
             urllib.request.urlretrieve(url, tmp_path)
@@ -134,7 +143,7 @@ def download_file(url: str, output_path: str) -> Tuple[bool, str]:
 
 def main():
     """Main download function."""
-    # Get data directory from config (defaults to backend/data)
+    # Get data directory from config (defaults to data within backend)
     data_dir = Config.get_data_dir()
     
     # Ensure directory exists
@@ -189,12 +198,14 @@ def main():
     
     print()
     
-    # Final check: verify all files exist
+    # Final check: verify all files exist and have non-zero size
     missing_files = []
     for filename in artifacts:
         filepath = os.path.join(data_dir, filename)
         if not os.path.exists(filepath):
             missing_files.append(filename)
+        elif os.path.getsize(filepath) == 0:
+            missing_files.append(f"{filename} (empty)")
         else:
             size_mb = os.path.getsize(filepath) / (1024 * 1024)
             print(f"  ✓ {filename}: {size_mb:.2f} MB")
@@ -220,4 +231,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

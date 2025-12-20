@@ -21,14 +21,16 @@ These files are excluded by `.gitignore` rules:
 
 ## Where to Get These Files
 
-### Option 1: Google Drive (Already Configured) ✅
+### Option 1: GitHub Releases (Automatically Downloaded) ✅
 
-All files are available on Google Drive and will be automatically downloaded during Render deployment:
+All files are available on GitHub Releases (tag: `v1.0.0-models`) and are automatically downloaded during deployment:
 
-- **df.pkl**: https://drive.google.com/file/d/1DzBhRncYzif5bsbgIDxxgxb05T9mh8-h/view?usp=drive_link
-- **bm25.pkl**: https://drive.google.com/file/d/1LZBDvDHKCylR2YRzUrywvDaREVXpEc4Y/view?usp=drive_link
-- **embeddings.pt**: https://drive.google.com/file/d/12e382jL02z56gz5fPOINxBxHYVTBqIBb/view?usp=drive_link
-- **graph.pkl**: https://drive.google.com/file/d/1KX1Bl54xINL75QOhtA9Av_9SBJxVuYPU/view?usp=drive_link
+- **df.pkl**: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+- **bm25.pkl**: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
+- **embeddings.pt**: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
+- **graph.pkl**: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
+
+The `scripts/download_artifacts.py` script automatically downloads these during the Render build process.
 
 ### Option 2: Generate Locally
 
@@ -36,8 +38,8 @@ You can regenerate these files using the `ISR_Project.ipynb` notebook.
 
 ### Option 3: Download Manually
 
-1. Download from Google Drive links above
-2. Place them in the `data/` directory at the repository root
+1. Download from GitHub Releases links above
+2. Place them in the `backend/data/` directory (or set `DATA_DIR` env var)
 3. Ensure file permissions allow reading
 
 ## For Local Development
@@ -54,7 +56,7 @@ seekerscholar/
 
 ## For Render Deployment
 
-The files are automatically downloaded during the build process using the `download_data.py` script, which uses the pre-configured Google Drive file IDs.
+The files are automatically downloaded during the **BUILD** command using the `scripts/download_artifacts.py` script, which downloads from GitHub Releases. This ensures the server can bind to `$PORT` immediately in the START command, preventing "No open ports detected" errors.
 
 ## File Descriptions
 
