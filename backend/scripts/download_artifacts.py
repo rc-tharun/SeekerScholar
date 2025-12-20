@@ -44,7 +44,7 @@ ENV_VAR_MAP = {
 
 def download_file(url: str, output_path: str) -> Tuple[bool, str]:
     """
-    Download file from URL with progress tracking and atomic write.
+    Download file from URL with progress tracking, atomic write, and retry logic.
     
     Args:
         url: Direct download URL
@@ -53,108 +53,151 @@ def download_file(url: str, output_path: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (success: bool, message: str)
     """
-    try:
-        import requests
-        
-        # Check if file already exists and has non-zero size (idempotent)
-        if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            if file_size > 0:
-                size_mb = file_size / (1024 * 1024)
-                print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
-                return True, "File already exists"
-            else:
-                # File exists but is empty, remove it and re-download
-                os.remove(output_path)
-                print(f"  ⚠ {os.path.basename(output_path)} exists but is empty, re-downloading...")
-        
-        print(f"  Downloading {os.path.basename(output_path)} from {url}...")
-        
-        # Download to temporary file first (atomic write)
-        tmp_path = output_path + ".tmp"
-        
-        # Stream download with progress
-        response = requests.get(url, stream=True, timeout=300)
-        response.raise_for_status()
-        
-        # Check content length for progress
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        
-        with open(tmp_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        percent = (downloaded / total_size) * 100
-                        print(f"\r    Progress: {percent:.1f}% ({downloaded / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB)", end='', flush=True)
-        
-        print()  # New line after progress
-        
-        # Validate non-zero file size
-        file_size = os.path.getsize(tmp_path)
-        if file_size == 0:
-            os.remove(tmp_path)
-            return False, "Downloaded file is empty"
-        
-        # Atomic rename
-        shutil.move(tmp_path, output_path)
-        
-        size_mb = file_size / (1024 * 1024)
-        print(f"  ✓ Downloaded {os.path.basename(output_path)} ({size_mb:.2f} MB)")
-        return True, "Download successful"
-        
-    except ImportError:
-        # Fallback to urllib if requests not available
+    import time
+    
+    # Check if file already exists and has non-zero size (idempotent)
+    if os.path.exists(output_path):
+        file_size = os.path.getsize(output_path)
+        if file_size > 0:
+            size_mb = file_size / (1024 * 1024)
+            print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
+            return True, "File already exists"
+        else:
+            # File exists but is empty, remove it and re-download
+            os.remove(output_path)
+            print(f"  ⚠ {os.path.basename(output_path)} exists but is empty, re-downloading...")
+    
+    # Retry logic: 4 attempts with exponential backoff (2s, 4s, 8s)
+    max_attempts = 4
+    backoff_delays = [2, 4, 8]  # seconds
+    
+    for attempt in range(1, max_attempts + 1):
         try:
-            import urllib.request
-            print(f"  Downloading {os.path.basename(output_path)} (using urllib)...")
+            import requests
             
-            if os.path.exists(output_path):
-                file_size = os.path.getsize(output_path)
-                if file_size > 0:
-                    size_mb = file_size / (1024 * 1024)
-                    print(f"  ✓ {os.path.basename(output_path)} already exists ({size_mb:.2f} MB), skipping download")
-                    return True, "File already exists"
+            if attempt > 1:
+                delay = backoff_delays[min(attempt - 2, len(backoff_delays) - 1)]
+                print(f"  Retry attempt {attempt}/{max_attempts} after {delay}s backoff...")
+                time.sleep(delay)
             
+            print(f"  Downloading {os.path.basename(output_path)} from {url}...")
+            
+            # Download to temporary file first (atomic write)
             tmp_path = output_path + ".tmp"
-            urllib.request.urlretrieve(url, tmp_path)
             
+            # Stream download with progress
+            response = requests.get(url, stream=True, timeout=300)
+            response.raise_for_status()
+            
+            # Check content length for progress
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(tmp_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            print(f"\r    Progress: {percent:.1f}% ({downloaded / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB)", end='', flush=True)
+            
+            print()  # New line after progress
+            
+            # Validate non-zero file size
             file_size = os.path.getsize(tmp_path)
             if file_size == 0:
                 os.remove(tmp_path)
+                if attempt < max_attempts:
+                    continue  # Retry
                 return False, "Downloaded file is empty"
             
+            # Atomic rename
             shutil.move(tmp_path, output_path)
+            
             size_mb = file_size / (1024 * 1024)
             print(f"  ✓ Downloaded {os.path.basename(output_path)} ({size_mb:.2f} MB)")
             return True, "Download successful"
             
+        except ImportError:
+            # Fallback to urllib if requests not available
+            try:
+                import urllib.request
+                if attempt > 1:
+                    delay = backoff_delays[min(attempt - 2, len(backoff_delays) - 1)]
+                    print(f"  Retry attempt {attempt}/{max_attempts} after {delay}s backoff...")
+                    time.sleep(delay)
+                
+                print(f"  Downloading {os.path.basename(output_path)} (using urllib)...")
+                
+                tmp_path = output_path + ".tmp"
+                urllib.request.urlretrieve(url, tmp_path)
+                
+                file_size = os.path.getsize(tmp_path)
+                if file_size == 0:
+                    os.remove(tmp_path)
+                    if attempt < max_attempts:
+                        continue  # Retry
+                    return False, "Downloaded file is empty"
+                
+                shutil.move(tmp_path, output_path)
+                size_mb = file_size / (1024 * 1024)
+                print(f"  ✓ Downloaded {os.path.basename(output_path)} ({size_mb:.2f} MB)")
+                return True, "Download successful"
+                
+            except Exception as e:
+                # Check if we should retry
+                is_retryable = (
+                    "timeout" in str(e).lower() or
+                    "connection" in str(e).lower() or
+                    "broken pipe" in str(e).lower() or
+                    "network" in str(e).lower()
+                )
+                if attempt < max_attempts and is_retryable:
+                    continue  # Retry on network errors
+                return False, f"Download error: {str(e)}"
         except Exception as e:
+            # Clean up temp file on error
+            tmp_path = output_path + ".tmp"
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            
+            # Check if we should retry
+            is_retryable = False
+            error_str = str(e).lower()
+            
+            # Network/timeout errors
+            if any(keyword in error_str for keyword in ["timeout", "connection", "broken pipe", "network"]):
+                is_retryable = True
+            # HTTP errors >= 500 (server errors)
+            elif hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                if e.response.status_code >= 500:
+                    is_retryable = True
+            # requests exceptions
+            elif "requests.exceptions" in str(type(e)):
+                is_retryable = True
+            
+            if attempt < max_attempts and is_retryable:
+                continue  # Retry
             return False, f"Download error: {str(e)}"
-    except Exception as e:
-        # Clean up temp file on error
-        tmp_path = output_path + ".tmp"
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        return False, f"Download error: {str(e)}"
+    
+    # All attempts failed
+    return False, f"Download failed after {max_attempts} attempts"
 
 
 def main():
     """Main download function."""
-    # Get data directory from environment variable or default to /app/data (Docker) or data (local)
+    # Get data directory from environment variable
+    # Priority: DATA_DIR env var > default to "data" (non-Docker)
     data_dir = os.getenv("DATA_DIR")
-    if not data_dir:
-        # Check if we're in Docker (/app exists) or local development
-        if os.path.exists("/app"):
-            data_dir = "/app/data"
-        else:
-            # Local development: use config default
-            data_dir = Config.get_data_dir()
-    else:
-        # Use provided DATA_DIR
+    if data_dir:
+        # Use provided DATA_DIR (make absolute if relative)
         data_dir = os.path.abspath(data_dir)
+    else:
+        # Default to "data" when DATA_DIR is missing (non-Docker)
+        # Resolve relative to backend root (where scripts/ is located)
+        backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.path.abspath(os.path.join(backend_root, "data"))
     
     # Ensure directory exists
     Path(data_dir).mkdir(parents=True, exist_ok=True)

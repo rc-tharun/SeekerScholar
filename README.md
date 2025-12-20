@@ -215,44 +215,71 @@ Artifacts are automatically downloaded from GitHub Releases during startup. No n
 - `graph.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
 - `embeddings.pt` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
 
-#### Step 1: Configure Render Service
+#### Render Python Environment Deployment
 
-1. **Create a Render account** and create a new Web Service
+This project uses **Render's Python environment** (`env: python`), not Docker. The `Dockerfile` is present but not used by Render in this deployment mode.
 
-2. **Configure the service:**
-   - **Root Directory:** `backend`
-   - **Environment:** Python 3.11
-   - **Build Command:** 
-     ```bash
-     pip install -r requirements.txt && python3 scripts/download_artifacts.py
-     ```
-   - **Start Command:** 
-     ```bash
-     uvicorn app.api:app --host 0.0.0.0 --port $PORT
-     ```
-   
-   **Important:** Artifacts are downloaded during the BUILD command, not the START command. This ensures the server binds to `$PORT` immediately, preventing "No open ports detected" errors.
+**Configuration:** The deployment is configured via `backend/render.yaml`:
 
-3. **Set environment variables (optional):**
-   
-   **Required:**
-   - `PORT`: Automatically set by Render (do not override)
-   
-   **Data Directory (Optional):**
-   - `DATA_DIR`: Path to data directory (defaults to `data` within backend directory)
-   
-   **Artifact URLs (Optional - override default GitHub Releases URLs):**
-   - `BM25_URL`: Custom URL to download `bm25.pkl`
-   - `DF_URL`: Custom URL to download `df.pkl`
-   - `GRAPH_URL`: Custom URL to download `graph.pkl`
-   - `EMBEDDINGS_URL`: Custom URL to download `embeddings.pt`
-   
-   **Note:** If environment variables are not set, the script uses the default GitHub Releases URLs listed above.
+```yaml
+services:
+  - type: web
+    name: paper-search-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATA_DIR
+        value: data
+      - key: BM25_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
+      - key: DF_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+      - key: GRAPH_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
+      - key: EMBEDDINGS_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
+```
+
+**Key Points:**
+- **Environment:** Python 3.11 (`env: python`)
+- **Root Directory:** `backend` (Render will look for `render.yaml` in the repo root, but `rootDir` sets the working directory)
+- **Build Command:** Installs dependencies only
+- **Start Command:** Downloads artifacts first, then starts the server. Artifacts are downloaded at startup with retry logic (4 attempts with exponential backoff).
+- **Data Directory:** Set via `DATA_DIR` environment variable (defaults to `data` within backend directory)
+- **Artifact URLs:** Pre-configured in `render.yaml`, but can be overridden via environment variables if needed
+
+**Deployment Steps:**
+
+1. **Connect Repository:**
+   - Create a Render account and create a new Web Service
+   - Connect your GitHub repository
+   - Render will automatically detect `backend/render.yaml` and use it for configuration
+
+2. **Verify Configuration:**
+   - Render should auto-detect the `render.yaml` file
+   - Ensure the service shows:
+     - **Root Directory:** `backend`
+     - **Environment:** Python 3.11
+     - **Build Command:** `pip install -r requirements.txt`
+     - **Start Command:** `python scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port $PORT`
+
+3. **Environment Variables:**
+   - All required environment variables are set in `render.yaml`
+   - `PORT` is automatically set by Render (do not override)
+   - You can override artifact URLs via Render dashboard if needed
 
 4. **Deploy:**
-   - Connect your GitHub repository
    - Render will automatically deploy on push
-   - Check build logs to verify artifact downloads
+   - Check build logs to verify:
+     - Dependencies are installed
+     - Artifacts are downloaded (with retry logic if needed)
+     - Server starts successfully
+
+**Note:** The downloader script includes retry logic (4 attempts with 2s/4s/8s exponential backoff) to handle transient network errors, timeouts, and HTTP 500+ errors.
 
 **Health Check:** The `/health` endpoint reports artifact status. Render will use `GET /health` for health checks. Response includes:
 ```json
