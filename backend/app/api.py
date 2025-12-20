@@ -150,6 +150,7 @@ async def startup_event():
         logger.warning("Artifacts should be downloaded during BUILD command.")
     
     # Initialize search engine (only if artifacts exist)
+    # Wrap in try/except to ensure app always starts even if engine fails
     if all_exist:
         try:
             logger.info("Initializing search engine...")
@@ -157,11 +158,17 @@ async def startup_event():
             logger.info("✓ Search engine initialized successfully")
         except Exception as e:
             logger.error(f"✗ ERROR: Failed to initialize search engine: {e}")
-            logger.error("Server will start but search endpoints will fail.")
+            logger.error(f"✗ Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"✗ Traceback: {traceback.format_exc()}")
+            logger.error("Server will start but search endpoints will return 503.")
             engine = None
     else:
         logger.warning("Skipping search engine initialization - artifacts missing")
         engine = None
+    
+    # Ensure app always starts successfully
+    logger.info("✓ FastAPI application started successfully")
 
 
 # Request/Response Models (API Contract - DO NOT CHANGE)
@@ -187,11 +194,23 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
 
 
+class RootResponse(BaseModel):
+    """Simple response model for root endpoint."""
+    status: str = "ok"
+    message: str = "SeekerScholar API"
+
+
 class HealthResponse(BaseModel):
+    """Detailed health check response with artifact status."""
     status: str
     message: str
     artifacts: dict[str, bool]
     data_dir: str
+
+
+class HealthzResponse(BaseModel):
+    """Simple healthz endpoint response."""
+    ok: bool = True
 
 
 class PdfSearchResponse(BaseModel):
@@ -202,10 +221,19 @@ class PdfSearchResponse(BaseModel):
 
 
 # Endpoints
-@app.get("/", response_model=HealthResponse)
+@app.get("/", response_model=RootResponse)
 def root():
-    """Root endpoint."""
-    return {"status": "ok", "message": "SeekerScholar API"}
+    """Root endpoint. Always returns simple status."""
+    return RootResponse(status="ok", message="SeekerScholar API")
+
+
+@app.get("/healthz")
+def healthz():
+    """
+    Simple healthz endpoint for load balancers and monitoring.
+    Always returns {"ok": true} regardless of engine or artifact status.
+    """
+    return {"ok": True}
 
 
 @app.get("/health", response_model=HealthResponse)
