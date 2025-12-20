@@ -3,9 +3,8 @@ SearchEngine - High-performance 2-stage retrieval pipeline.
 Stage 1: Fast BM25 candidate generation (always runs first)
 Stage 2: Optional lightweight re-ranking on small candidate set only
 
-All document-side data is precomputed; only query-side processing happens per request.
+All document-side data is precomputed; artifacts are loaded lazily via resources module.
 """
-import pickle
 import torch
 import pandas as pd
 import networkx as nx
@@ -18,6 +17,7 @@ from sentence_transformers import SentenceTransformer, util
 import hashlib
 
 from app.config import Config
+from app.resources import get_df, get_embeddings, get_bm25, get_graph
 
 # Set up logging for performance profiling
 logger = logging.getLogger(__name__)
@@ -68,55 +68,83 @@ class SearchEngine:
     
     def __init__(self, data_dir: Optional[str] = None, cache_size: Optional[int] = None):
         """
-        Initialize the search engine by loading all precomputed artifacts.
+        Initialize the search engine. Artifacts are loaded lazily on first use.
         
         Args:
-            data_dir: Path to directory containing df.pkl, bm25.pkl, 
-                     embeddings.pt, and graph.pkl (defaults to Config.get_data_dir())
+            data_dir: Deprecated - kept for compatibility, not used (resources module handles paths)
             cache_size: Size of LRU cache for search results (defaults to Config.CACHE_SIZE)
         """
-        if data_dir is None:
-            data_dir = Config.get_data_dir()
         if cache_size is None:
             cache_size = Config.CACHE_SIZE
         
-        logger.info("Loading search engine components...")
+        logger.info("Initializing search engine (lazy loading enabled)...")
         
-        # Load DataFrame
-        self.df = pd.read_pickle(os.path.join(data_dir, "df.pkl"))
-        logger.info(f"Loaded DataFrame with {len(self.df)} papers")
+        # Store references to lazy-loading functions
+        # Artifacts will be loaded on first access
+        self._df = None
+        self._G = None
+        self._bm25 = None
+        self._corpus_embeddings = None
         
-        # Load NetworkX graph
-        with open(os.path.join(data_dir, "graph.pkl"), "rb") as f:
-            self.G = pickle.load(f)
-        logger.info(f"Loaded graph with {len(self.G)} nodes")
-        
-        # Load BM25 index (primary candidate generator)
-        with open(os.path.join(data_dir, "bm25.pkl"), "rb") as f:
-            self.bm25 = pickle.load(f)
-        logger.info("Loaded BM25 index")
-        
-        # Load BERT model and embeddings (for re-ranking only)
+        # Load BERT model (small, always needed for encoding queries)
+        logger.info("Loading BERT model for query encoding...")
         self.model = SentenceTransformer(Config.BERT_MODEL_NAME)
         self.device = 'cpu'
-        self.corpus_embeddings = torch.load(
-            os.path.join(data_dir, "embeddings.pt"), 
-            weights_only=False,
-            map_location='cpu'
-        )
-        logger.info(f"Loaded BERT model '{Config.BERT_MODEL_NAME}' and {len(self.corpus_embeddings)} embeddings")
         
-        # Precompute PageRank scores for all nodes (for fast re-weighting)
-        logger.info("Precomputing PageRank scores...")
-        self.pagerank_scores = nx.pagerank(self.G, alpha=0.85, max_iter=50, tol=1e-4)
-        logger.info("Precomputed PageRank scores")
+        # PageRank scores will be computed lazily when graph is first accessed
+        self._pagerank_scores = None
         
         # Initialize LRU cache for search results
         self._cache = {}
         self._cache_order = []
         self._cache_size = cache_size
         
-        logger.info("Search engine ready!")
+        logger.info("Search engine initialized (artifacts will load on first use)")
+    
+    @property
+    def df(self) -> pd.DataFrame:
+        """Lazy-load DataFrame."""
+        if self._df is None:
+            self._df = get_df()
+        return self._df
+    
+    @property
+    def G(self) -> nx.Graph:
+        """Lazy-load graph."""
+        if self._G is None:
+            self._G = get_graph()
+        return self._G
+    
+    @property
+    def bm25(self):
+        """Lazy-load BM25 index."""
+        if self._bm25 is None:
+            self._bm25 = get_bm25()
+        return self._bm25
+    
+    @property
+    def corpus_embeddings(self) -> torch.Tensor:
+        """
+        Lazy-load embeddings. 
+        Note: This property is kept for compatibility but _rerank_with_bert
+        accesses memmap directly to avoid loading full tensor into RAM.
+        """
+        # This property may not be used in practice since _rerank_with_bert
+        # accesses get_embeddings() directly, but kept for any other code paths
+        if self._corpus_embeddings is None:
+            emb_np = get_embeddings()
+            # Convert to torch tensor (creates a copy - only if this property is accessed)
+            self._corpus_embeddings = torch.from_numpy(emb_np.copy()).float()
+        return self._corpus_embeddings
+    
+    @property
+    def pagerank_scores(self) -> Dict[int, float]:
+        """Lazy-compute PageRank scores."""
+        if self._pagerank_scores is None:
+            logger.info("Precomputing PageRank scores...")
+            self._pagerank_scores = nx.pagerank(self.G, alpha=0.85, max_iter=50, tol=1e-4)
+            logger.info("Precomputed PageRank scores")
+        return self._pagerank_scores
     
     def _get_cache_key(self, query: str, method: str, top_k: int) -> str:
         """Generate cache key for a search query."""
@@ -216,8 +244,12 @@ class SearchEngine:
         )
         
         # Get embeddings for candidates only (not full corpus!)
+        # Access memmap array directly to avoid loading full tensor into RAM
         candidate_indices = [idx for idx, _ in candidates]
-        candidate_embeddings = self.corpus_embeddings[candidate_indices]
+        emb_np = get_embeddings()  # Returns numpy memmap
+        candidate_embeddings_np = emb_np[candidate_indices]  # Only loads candidate rows
+        # Convert to torch tensor for similarity computation (only candidates, not full corpus)
+        candidate_embeddings = torch.from_numpy(candidate_embeddings_np.copy()).float()
         
         # Compute cosine similarity (query vs candidates only)
         cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]

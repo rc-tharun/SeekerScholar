@@ -12,7 +12,7 @@ from app.config import Config
 
 def check_data_files(data_dir: str) -> tuple[bool, List[str]]:
     """
-    Check if all required data files exist.
+    Check if all required data files exist (lite format).
     
     Args:
         data_dir: Directory to check
@@ -20,7 +20,7 @@ def check_data_files(data_dir: str) -> tuple[bool, List[str]]:
     Returns:
         Tuple of (all_exist: bool, missing_files: List[str])
     """
-    required_files = ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]
+    required_files = ["df.parquet", "bm25.pkl", "embeddings.f16.npy", "embeddings.meta.json", "graph.pkl"]
     missing_files = []
     
     for filename in required_files:

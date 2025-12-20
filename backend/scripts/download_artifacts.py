@@ -25,20 +25,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import Config
 
 # Default GitHub Releases URLs
+# Using v1.0.0-models for now - update to v1.0.1-models-lite when new artifacts are uploaded
 DEFAULT_BASE_URL = "https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models"
 DEFAULT_URLS = {
     "bm25.pkl": f"{DEFAULT_BASE_URL}/bm25.pkl",
-    "df.pkl": f"{DEFAULT_BASE_URL}/df.pkl",
+    "df.parquet": f"{DEFAULT_BASE_URL}/df.parquet",
     "graph.pkl": f"{DEFAULT_BASE_URL}/graph.pkl",
-    "embeddings.pt": f"{DEFAULT_BASE_URL}/embeddings.pt",
+    "embeddings.f16.npy": f"{DEFAULT_BASE_URL}/embeddings.f16.npy",
+    "embeddings.meta.json": f"{DEFAULT_BASE_URL}/embeddings.meta.json",
 }
 
 # Environment variable mapping
 ENV_VAR_MAP = {
     "bm25.pkl": "BM25_URL",
-    "df.pkl": "DF_URL",
+    "df.parquet": "DF_PARQUET_URL",
     "graph.pkl": "GRAPH_URL",
-    "embeddings.pt": "EMBEDDINGS_URL",
+    "embeddings.f16.npy": "EMBEDDINGS_NPY_URL",
+    "embeddings.meta.json": "EMBEDDINGS_META_URL",
 }
 
 
@@ -209,8 +212,8 @@ def main():
     print(f"Absolute path: {os.path.abspath(data_dir)}")
     print()
     
-    # Define required artifacts
-    artifacts = ["bm25.pkl", "df.pkl", "graph.pkl", "embeddings.pt"]
+    # Define required artifacts (lite format)
+    artifacts = ["bm25.pkl", "df.parquet", "graph.pkl", "embeddings.f16.npy", "embeddings.meta.json"]
     
     results = {}
     failed = []

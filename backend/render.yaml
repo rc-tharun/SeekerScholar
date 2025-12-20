@@ -14,10 +14,12 @@ services:
         value: https://seeker-scholar.vercel.app
       - key: BM25_URL
         value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
-      - key: DF_URL
-        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+      - key: DF_PARQUET_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.parquet
       - key: GRAPH_URL
         value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
-      - key: EMBEDDINGS_URL
-        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
+      - key: EMBEDDINGS_NPY_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.f16.npy
+      - key: EMBEDDINGS_META_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.meta.json
 

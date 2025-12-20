@@ -33,10 +33,11 @@ seekerscholar/
 │   │   └── *.css          # Styles
 │   ├── package.json       # Node dependencies
 │   └── vite.config.js     # Vite configuration
-├── data/                  # Precomputed artifacts
-│   ├── df.pkl            # Papers DataFrame
+├── data/                  # Precomputed artifacts (lite format)
+│   ├── df.parquet        # Papers DataFrame (compressed Parquet)
 │   ├── bm25.pkl          # BM25 index
-│   ├── embeddings.pt     # BERT embeddings
+│   ├── embeddings.f16.npy # BERT embeddings (float16, memory-mapped)
+│   ├── embeddings.meta.json # Embeddings metadata
 │   └── graph.pkl         # Citation graph
 └── README.md
 ```
@@ -47,7 +48,14 @@ seekerscholar/
 - Node.js 18+ (for frontend)
 - Precomputed data artifacts in `data/` directory
 
-**Note:** Artifacts are not stored in GitHub; they are downloaded during build. The data files (`df.pkl`, `bm25.pkl`, `embeddings.pt`, `graph.pkl`) are automatically downloaded from GitHub Releases (tag: `v1.0.0-models`) during deployment or first run. See [Deployment](#deployment) section for details.
+**Note:** Artifacts are not stored in GitHub; they are downloaded during build. The backend uses **lite artifacts** for reduced RAM usage:
+- `df.parquet` - Compressed columnar format (instead of `df.pkl`)
+- `embeddings.f16.npy` - Float16 numpy memmap format (instead of `embeddings.pt`)
+- `embeddings.meta.json` - Metadata for embeddings shape/dtype
+- `bm25.pkl` - BM25 index (unchanged)
+- `graph.pkl` - Citation graph (unchanged)
+
+Artifacts are automatically downloaded from GitHub Releases during deployment. See [Deployment](#deployment) section for details.
 
 ## Local Development
 
@@ -111,8 +119,8 @@ VITE_API_BASE_URL=http://localhost:8000
 ```
 Or use `VITE_API_URL` for backward compatibility.
 
-**For Production (Vercel) - REQUIRED:**
-⚠️ **CRITICAL:** You must set `VITE_API_BASE_URL` in Vercel for production deployment.
+**For Production (Vercel) - RECOMMENDED:**
+The frontend defaults to `https://seekerscholar-1.onrender.com` in production, but it's recommended to set `VITE_API_BASE_URL` explicitly in Vercel for clarity and flexibility.
 
 1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables
 2. Add environment variable:
@@ -120,9 +128,8 @@ Or use `VITE_API_URL` for backward compatibility.
    - **Value:** `https://seekerscholar-1.onrender.com` (or your backend URL)
    - **Environment:** Production (and Preview if desired)
 3. **Redeploy** your project after adding the variable
-   - The app will fail in production if this variable is not set (no localhost fallback)
 
-**Note:** The frontend code requires `VITE_API_BASE_URL` in production and will throw an error if missing. This prevents accidental localhost calls in production.
+**Note:** The frontend code defaults to `https://seekerscholar-1.onrender.com` in production if `VITE_API_BASE_URL` is not set, so the app will work even without the env var. However, setting it explicitly is recommended for clarity.
 
 **Backend:**
 Optional environment variables (create `.env` in `backend/` or set in deployment platform):
@@ -224,11 +231,18 @@ Example: `GET /search?query=neural%20networks&method=bert&top_k=5`
 
 Artifacts are automatically downloaded from GitHub Releases during startup. No need to commit large files to GitHub!
 
-**Artifact Source:** Artifacts are hosted in GitHub Releases (tag: `v1.0.0-models`) and downloaded automatically at runtime:
+**Artifact Source:** Lite artifacts are hosted in GitHub Releases (tag: `v1.0.0-models`) and downloaded automatically at runtime:
 - `bm25.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
-- `df.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+- `df.parquet` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.parquet
 - `graph.pkl` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
-- `embeddings.pt` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
+- `embeddings.f16.npy` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.f16.npy
+- `embeddings.meta.json` → https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.meta.json
+
+**Memory Optimization:** The backend uses lazy loading and memory-mapped files to reduce RAM usage:
+- DataFrame loads from compressed Parquet (columnar format)
+- Embeddings use numpy memmap (memory-mapped, not fully loaded into RAM)
+- Artifacts load on-demand, not at startup
+- Designed to fit under 512MB RAM on Render
 
 #### Render Python Environment Deployment
 
@@ -251,12 +265,14 @@ services:
         value: data
       - key: BM25_URL
         value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/bm25.pkl
-      - key: DF_URL
-        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.pkl
+      - key: DF_PARQUET_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/df.parquet
       - key: GRAPH_URL
         value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/graph.pkl
-      - key: EMBEDDINGS_URL
-        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.pt
+      - key: EMBEDDINGS_NPY_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.f16.npy
+      - key: EMBEDDINGS_META_URL
+        value: https://github.com/rc-tharun/SeekerScholar/releases/download/v1.0.0-models/embeddings.meta.json
 ```
 
 **Key Points:**
@@ -404,7 +420,11 @@ The search engine has been optimized for low latency using a 2-stage retrieval p
 
 5. **Query Caching**: An in-memory LRU cache (256 entries) caches search results for frequently repeated queries, providing near-instant responses for cached queries.
 
-6. **Efficient Model Loading**: All models and embeddings are loaded once at startup, not per-request.
+6. **Lazy Loading & Memory Optimization**: 
+   - Artifacts load on-demand, not at startup
+   - DataFrame uses compressed Parquet format
+   - Embeddings use numpy memmap (memory-mapped, not fully loaded into RAM)
+   - Designed to fit under 512MB RAM on Render
 
 ### Performance Characteristics
 
@@ -426,14 +446,39 @@ uvicorn app.api:app --host 0.0.0.0 --port 8000 --workers 2
 gunicorn app.api:app -k uvicorn.workers.UvicornWorker -w 2 --bind 0.0.0.0:8000
 ```
 
-**Note**: When using multiple workers, each worker will load its own copy of the models and embeddings. Ensure sufficient memory (recommended: 4GB+ per worker).
+**Note**: With lazy loading, each worker only loads artifacts when needed. However, for production on Render with 512MB RAM limit, use a single worker (default). Multiple workers are not recommended due to memory constraints.
 
 ## Development Notes
 
-- The backend expects the `data/` folder to be at `../data` relative to the `backend/` directory
+- The backend expects the `data/` folder to be at `../data` relative to the `backend/` directory (or set via `DATA_DIR` env var)
 - All heavy computations (BM25 index, embeddings, graph) are precomputed
-- The engine loads all artifacts on startup, which may take a few seconds
+- **Lazy Loading:** Artifacts load on-demand, not at startup, to reduce RAM usage
+- **Memory Optimization:** Uses Parquet for DataFrame and numpy memmap for embeddings
 - For production, consider adding rate limiting and monitoring
+
+### Converting Artifacts to Lite Format
+
+To convert existing heavy artifacts (`df.pkl`, `embeddings.pt`) to lite format:
+
+1. **Run conversion script locally:**
+   ```bash
+   cd backend
+   python scripts/convert_artifacts.py
+   ```
+
+2. **Upload converted files to GitHub Releases:**
+   - `df.parquet`
+   - `embeddings.f16.npy`
+   - `embeddings.meta.json`
+   - Keep existing: `bm25.pkl`, `graph.pkl`
+
+3. **Update `render.yaml` with new URLs** (if using a new release tag)
+
+The conversion script:
+- Converts `df.pkl` → `df.parquet` (compressed, columnar format)
+- Converts `embeddings.pt` → `embeddings.f16.npy` (float16, memory-mapped)
+- Creates `embeddings.meta.json` with shape and dtype information
+- Reduces file sizes significantly for faster downloads and lower RAM usage
 
 ## Troubleshooting
 

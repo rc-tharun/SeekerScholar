@@ -139,7 +139,7 @@ async def startup_event():
     
     if all_exist:
         logger.info("✓ All required artifacts present")
-        for filename in ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]:
+        for filename in ["df.parquet", "bm25.pkl", "embeddings.f16.npy", "embeddings.meta.json", "graph.pkl"]:
             filepath = os.path.join(data_dir, filename)
             if os.path.exists(filepath):
                 size_mb = os.path.getsize(filepath) / (1024 * 1024)
@@ -203,9 +203,9 @@ class RootResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Detailed health check response with artifact status."""
     status: str
-    message: str
-    artifacts: dict[str, bool]
     data_dir: str
+    files: dict[str, bool]  # File existence status
+    loaded: dict[str, bool]  # Resource loaded status
 
 
 class HealthzResponse(BaseModel):
@@ -240,39 +240,30 @@ def healthz():
 def health():
     """
     Health check endpoint.
-    Returns API status and artifact availability (without exposing file contents).
+    Returns API status, file existence, and resource loaded status.
     Works even if artifacts are missing (does not crash).
     """
-    from app.data_loader import check_data_files
+    from app.resources import check_files_exist, get_loaded_status
     
     # Use global data_dir if available, otherwise get from config
     current_data_dir = data_dir if data_dir else Config.get_data_dir()
-    all_exist, missing_files = check_data_files(current_data_dir)
     
-    # Check individual artifacts using the current data directory
-    artifacts = {
-        "bm25": os.path.exists(os.path.join(current_data_dir, "bm25.pkl")),
-        "df": os.path.exists(os.path.join(current_data_dir, "df.pkl")),
-        "graph": os.path.exists(os.path.join(current_data_dir, "graph.pkl")),
-        "embeddings": os.path.exists(os.path.join(current_data_dir, "embeddings.pt")),
+    # Check if files exist
+    files = check_files_exist()
+    
+    # Check which resources are loaded in memory
+    loaded = get_loaded_status()
+    
+    # Determine status
+    all_files_exist = all(files.values())
+    status = "ok" if all_files_exist else "degraded"
+    
+    return {
+        "status": status,
+        "data_dir": current_data_dir,
+        "files": files,
+        "loaded": loaded
     }
-    
-    engine_status = "initialized" if engine is not None else "not initialized"
-    
-    if all_exist and engine is not None:
-        return {
-            "status": "ok",
-            "message": f"API is healthy (engine: {engine_status})",
-            "artifacts": artifacts,
-            "data_dir": current_data_dir
-        }
-    else:
-        return {
-            "status": "degraded",
-            "message": f"API is running but some artifacts are missing (engine: {engine_status})",
-            "artifacts": artifacts,
-            "data_dir": current_data_dir
-        }
 
 
 @app.post("/search", response_model=SearchResponse)
