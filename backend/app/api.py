@@ -92,6 +92,33 @@ app = FastAPI(title="SeekerScholar API", version="1.0.0")
 engine = None
 data_dir = None
 
+# Add CORS middleware BEFORE routes are defined
+# Read allowed origin from FRONTEND_ORIGIN environment variable
+# If set, allow only that exact origin. Otherwise, allow localhost for local development.
+frontend_origin = os.getenv("FRONTEND_ORIGIN")
+if frontend_origin:
+    # Production: allow only the specified frontend origin
+    allow_origins = [frontend_origin]
+    logger.info(f"CORS: Allowing origin from FRONTEND_ORIGIN: {frontend_origin}")
+else:
+    # Development: allow localhost origins
+    allow_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",  # Vite default port
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ]
+    logger.info(f"CORS: Development mode - allowing localhost origins: {allow_origins}")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -104,6 +131,7 @@ async def startup_event():
     logger.info(f"{'='*60}")
     logger.info(f"Data directory: {data_dir}")
     logger.info(f"Absolute path: {os.path.abspath(data_dir)}")
+    logger.info(f"CORS allowed origins: {allow_origins}")
     
     # Check artifact status
     from app.data_loader import check_data_files
@@ -134,30 +162,6 @@ async def startup_event():
     else:
         logger.warning("Skipping search engine initialization - artifacts missing")
         engine = None
-
-# Add CORS middleware
-# Read allowed origin from FRONTEND_ORIGIN environment variable
-# If set, allow only that exact origin. Otherwise, allow localhost for local development.
-frontend_origin = os.getenv("FRONTEND_ORIGIN")
-if frontend_origin:
-    # Production: allow only the specified frontend origin
-    allow_origins = [frontend_origin]
-else:
-    # Development: allow localhost origins
-    allow_origins = [
-        "http://localhost:3000",
-        "http://localhost:5173",  # Vite default port
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-    ]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # Request/Response Models (API Contract - DO NOT CHANGE)
