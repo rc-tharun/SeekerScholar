@@ -76,7 +76,7 @@ import os
 from app.config import Config
 from app.engine import SearchEngine, normalize_and_truncate_query
 from app.pdf_utils import extract_text_from_file, first_n_words
-from app.data_loader import ensure_data_files
+# Removed ensure_data_files import - artifacts downloaded during BUILD command
 
 # Configure logging
 logging.basicConfig(
@@ -88,47 +88,52 @@ logger = logging.getLogger(__name__)
 # Create FastAPI instance
 app = FastAPI(title="SeekerScholar API", version="1.0.0")
 
-# Ensure data files exist
-data_dir = Config.get_data_dir()
-logger.info(f"{'='*60}")
-logger.info(f"SeekerScholar Backend Starting")
-logger.info(f"{'='*60}")
-logger.info(f"Data directory: {data_dir}")
-logger.info(f"Absolute path: {os.path.abspath(data_dir)}")
+# Global variables for search engine and data directory
+engine = None
+data_dir = None
 
-# Check artifact status before attempting to load
-from app.data_loader import check_data_files
-all_exist, missing_files = check_data_files(data_dir)
-if all_exist:
-    logger.info("✓ All required artifacts present")
-    for filename in ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]:
-        filepath = os.path.join(data_dir, filename)
-        if os.path.exists(filepath):
-            size_mb = os.path.getsize(filepath) / (1024 * 1024)
-            logger.info(f"  ✓ {filename}: {size_mb:.2f} MB")
-else:
-    logger.warning(f"⚠ Missing artifacts: {', '.join(missing_files)}")
-    logger.info("Attempting to download missing artifacts...")
 
-ensure_data_files(data_dir)
-
-# Verify again after download attempt
-all_exist, still_missing = check_data_files(data_dir)
-if not all_exist:
-    logger.error(f"✗ ERROR: Required artifacts still missing: {', '.join(still_missing)}")
-    logger.error("Server will start but search functionality may not work.")
-else:
-    logger.info("✓ All artifacts verified")
-
-# Initialize search engine
-logger.info("Initializing search engine...")
-try:
-    engine = SearchEngine(data_dir=data_dir, cache_size=Config.CACHE_SIZE)
-    logger.info("✓ Search engine initialized successfully")
-except Exception as e:
-    logger.error(f"✗ ERROR: Failed to initialize search engine: {e}")
-    logger.error("Server will start but search endpoints will fail.")
-    raise
+@app.on_event("startup")
+async def startup_event():
+    """Initialize search engine and artifacts on startup (not at import time)."""
+    global engine, data_dir
+    
+    data_dir = Config.get_data_dir()
+    logger.info(f"{'='*60}")
+    logger.info(f"SeekerScholar Backend Starting")
+    logger.info(f"{'='*60}")
+    logger.info(f"Data directory: {data_dir}")
+    logger.info(f"Absolute path: {os.path.abspath(data_dir)}")
+    
+    # Check artifact status
+    from app.data_loader import check_data_files
+    all_exist, missing_files = check_data_files(data_dir)
+    
+    if all_exist:
+        logger.info("✓ All required artifacts present")
+        for filename in ["df.pkl", "bm25.pkl", "embeddings.pt", "graph.pkl"]:
+            filepath = os.path.join(data_dir, filename)
+            if os.path.exists(filepath):
+                size_mb = os.path.getsize(filepath) / (1024 * 1024)
+                logger.info(f"  ✓ {filename}: {size_mb:.2f} MB")
+    else:
+        logger.warning(f"⚠ Missing artifacts: {', '.join(missing_files)}")
+        logger.warning("Server will start but search functionality may not work.")
+        logger.warning("Artifacts should be downloaded during BUILD command.")
+    
+    # Initialize search engine (only if artifacts exist)
+    if all_exist:
+        try:
+            logger.info("Initializing search engine...")
+            engine = SearchEngine(data_dir=data_dir, cache_size=Config.CACHE_SIZE)
+            logger.info("✓ Search engine initialized successfully")
+        except Exception as e:
+            logger.error(f"✗ ERROR: Failed to initialize search engine: {e}")
+            logger.error("Server will start but search endpoints will fail.")
+            engine = None
+    else:
+        logger.warning("Skipping search engine initialization - artifacts missing")
+        engine = None
 
 # Add CORS middleware
 # Allow origins from environment variable or default to all (for development)
@@ -197,33 +202,37 @@ def health():
     """
     Health check endpoint.
     Returns API status and artifact availability (without exposing file contents).
+    Works even if artifacts are missing (does not crash).
     """
     from app.data_loader import check_data_files
     
-    data_dir = Config.get_data_dir()
-    all_exist, missing_files = check_data_files(data_dir)
+    # Use global data_dir if available, otherwise get from config
+    current_data_dir = data_dir if data_dir else Config.get_data_dir()
+    all_exist, missing_files = check_data_files(current_data_dir)
     
-    # Check individual artifacts
+    # Check individual artifacts using the current data directory
     artifacts = {
-        "bm25": os.path.exists(Config.artifact_path("bm25.pkl")),
-        "df": os.path.exists(Config.artifact_path("df.pkl")),
-        "graph": os.path.exists(Config.artifact_path("graph.pkl")),
-        "embeddings": os.path.exists(Config.artifact_path("embeddings.pt")),
+        "bm25": os.path.exists(os.path.join(current_data_dir, "bm25.pkl")),
+        "df": os.path.exists(os.path.join(current_data_dir, "df.pkl")),
+        "graph": os.path.exists(os.path.join(current_data_dir, "graph.pkl")),
+        "embeddings": os.path.exists(os.path.join(current_data_dir, "embeddings.pt")),
     }
     
-    if all_exist:
+    engine_status = "initialized" if engine is not None else "not initialized"
+    
+    if all_exist and engine is not None:
         return {
             "status": "ok",
-            "message": "API is healthy",
+            "message": f"API is healthy (engine: {engine_status})",
             "artifacts": artifacts,
-            "data_dir": data_dir
+            "data_dir": current_data_dir
         }
     else:
         return {
             "status": "degraded",
-            "message": "API is running but some artifacts are missing",
+            "message": f"API is running but some artifacts are missing (engine: {engine_status})",
             "artifacts": artifacts,
-            "data_dir": data_dir
+            "data_dir": current_data_dir
         }
 
 
@@ -248,6 +257,13 @@ def search(request: SearchRequest):
         raise HTTPException(status_code=400, detail=str(e))
     
     try:
+        # Check if engine is initialized
+        if engine is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Search engine not initialized. Artifacts may be missing. Check /health endpoint."
+            )
+        
         # Preprocess and normalize query (handles truncation internally)
         query = normalize_and_truncate_query(request.query)
         
@@ -338,6 +354,13 @@ async def search_from_pdf(
         
         # Normalize extracted text (for display in response)
         extracted_text = normalize_and_truncate_query(raw_extracted_text)
+        
+        # Check if engine is initialized
+        if engine is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Search engine not initialized. Artifacts may be missing. Check /health endpoint."
+            )
         
         # For file uploads: use only first 100 words as search query
         # This speeds up search while keeping the full extracted text in the response

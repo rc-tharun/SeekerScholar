@@ -59,45 +59,18 @@ def download_data_files(data_dir: str) -> bool:
 
 def ensure_data_files(data_dir: str) -> None:
     """
-    Ensure all required data files exist, downloading if necessary.
+    DEPRECATED: This function is no longer used.
+    Artifacts should be downloaded during BUILD command using scripts/download_artifacts.py.
+    
+    This function is kept for backward compatibility but does nothing.
+    It will NOT raise FileNotFoundError to avoid crashing at import time.
     
     Args:
         data_dir: Directory containing data files
-        
-    Raises:
-        FileNotFoundError: If files are missing and download fails
     """
-    all_exist, missing_files = check_data_files(data_dir)
-    
-    if all_exist:
-        print("✓ All data files found!")
-        return
-    
-    print(f"\n{'='*60}")
-    print(f"MISSING DATA FILES: {', '.join(missing_files)}")
-    print(f"{'='*60}\n")
-    
-    # Try to download missing files
-    success = download_data_files(data_dir)
-    
-    if not success:
-        print("\nERROR: Download failed!")
-    
-    # Check again
-    all_exist, still_missing = check_data_files(data_dir)
-    
-    if not all_exist:
-        print(f"\n{'='*60}")
-        print(f"ERROR: Could not obtain files: {', '.join(still_missing)}")
-        print(f"{'='*60}")
-        print(f"Data directory: {data_dir}")
-        if os.path.exists(data_dir):
-            print(f"Directory contents: {os.listdir(data_dir)}")
-        else:
-            print("Data directory does not exist!")
-        raise FileNotFoundError(f"Data files not found: {', '.join(still_missing)}")
-    
-    print("✓ All data files available!")
+    # Do nothing - artifacts should be downloaded during BUILD command
+    # This prevents crashes at import time
+    pass
 
 
 

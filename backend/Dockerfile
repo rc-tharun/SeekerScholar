@@ -14,14 +14,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 
-# Note: Data directory should be mounted or copied separately
-# For deployment, ensure data/ folder is available at ../data relative to backend/
+# Copy scripts directory (needed for artifact download)
+COPY scripts/ ./scripts/
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Set default DATA_DIR for Docker environment
+ENV DATA_DIR=/app/data
 
 # Expose port (Render will set PORT env var)
 EXPOSE 8000
 
-# Run the application
-# Use PORT environment variable if set, otherwise default to 8000
-# Note: For Render, use the start command directly: uvicorn app.api:app --host 0.0.0.0 --port $PORT
-CMD ["sh", "-c", "uvicorn app.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Download artifacts first, then start uvicorn
+# This ensures artifacts are present before the server binds to $PORT
+CMD ["sh", "-c", "python scripts/download_artifacts.py && uvicorn app.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
 

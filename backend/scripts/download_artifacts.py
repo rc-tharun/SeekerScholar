@@ -143,8 +143,18 @@ def download_file(url: str, output_path: str) -> Tuple[bool, str]:
 
 def main():
     """Main download function."""
-    # Get data directory from config (defaults to data within backend)
-    data_dir = Config.get_data_dir()
+    # Get data directory from environment variable or default to /app/data (Docker) or data (local)
+    data_dir = os.getenv("DATA_DIR")
+    if not data_dir:
+        # Check if we're in Docker (/app exists) or local development
+        if os.path.exists("/app"):
+            data_dir = "/app/data"
+        else:
+            # Local development: use config default
+            data_dir = Config.get_data_dir()
+    else:
+        # Use provided DATA_DIR
+        data_dir = os.path.abspath(data_dir)
     
     # Ensure directory exists
     Path(data_dir).mkdir(parents=True, exist_ok=True)
